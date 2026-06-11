@@ -24,3 +24,38 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* ── API-Sports widgets theme ─────────────────────────────────────────────
+   Overrides the widget CSS variables (data-theme="white" base) to match the
+   minimal neutral design. See https://widgets.api-sports.io docs. */
+api-sports-widget {
+  display: block;
+  --primary-font-size: 0.875rem;
+  --secondary-font-size: 0.75rem;
+  --tertiary-font-size: 0.72rem;
+  --background-color: var(--background);
+  --text-color: var(--foreground);
+  --border: 1px solid #e5e5e5; /* neutral-200 */
+  --hover: #f5f5f5; /* neutral-100 */
+}
+
+@media (prefers-color-scheme: dark) {
+  api-sports-widget {
+    --border: 1px solid #262626; /* neutral-800 */
+    --hover: #171717; /* neutral-900 */
+  }
+}
+
+/* Built-in team/player/game modals opened via data-target-*="modal" */
+.modal-widget {
+  background: rgba(0, 0, 0, 0.55);
+}
+
+.modal-widget-content {
+  max-width: 56rem;
+  width: calc(100% - 2rem);
+  max-height: 85vh;
+  overflow-y: auto;
+  border-radius: 1rem;
+  background: var(--background);
+}
