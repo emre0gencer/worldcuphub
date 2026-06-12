@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Geist, Geist_Mono } from "next/font/google";
 import ApiSportsConfig from "@/components/widgets/ApiSportsConfig";
+import SeasonSwitcher from "@/components/SeasonSwitcher";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -42,10 +43,14 @@ export default function RootLayout({
               <Link href="/standings" className="hover:text-neutral-900 dark:hover:text-neutral-100">
                 Standings
               </Link>
+              <Link href="/players" className="hover:text-neutral-900 dark:hover:text-neutral-100">
+                Players
+              </Link>
               <Link href="/rankings" className="hover:text-neutral-900 dark:hover:text-neutral-100">
                 Rankings
               </Link>
             </div>
+            <SeasonSwitcher />
           </nav>
         </header>
         <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-8">{children}</main>

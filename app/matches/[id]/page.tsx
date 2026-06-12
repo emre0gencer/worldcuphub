@@ -7,13 +7,22 @@ import {
   getFormForTeams,
   getLatestPrediction,
   getMatch,
+  getMatchEvents,
+  getMatchLineups,
   getPlayerMatchStats,
   getPriorMeetings,
   getSnapshotSeries,
   getTeamMatchStats,
+  getTeamSeasons,
   snapshotStat,
 } from "@/lib/queries";
-import type { MatchWithTeams, Team } from "@/lib/types";
+import type {
+  MatchEvent,
+  MatchLineup,
+  MatchLineupPlayer,
+  MatchWithTeams,
+  Team,
+} from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
@@ -23,31 +32,47 @@ const STAGE_LABEL: Record<string, string> = {
   R16: "Round of 16",
   QF: "Quarter-final",
   SF: "Semi-final",
+  third_place: "Third place",
   final: "Final",
 };
 
-function Flag({ team, size = "h-6 w-9" }: { team: Team | null; size?: string }) {
-  if (!team?.flag_url) return <span className={`${size} rounded bg-neutral-200 dark:bg-neutral-800`} />;
+function Logo({ team, size = "h-9 w-9" }: { team: Team | null; size?: string }) {
+  if (!team?.logo_url)
+    return <span className={`${size} rounded bg-neutral-200 dark:bg-neutral-800`} />;
   // eslint-disable-next-line @next/next/no-img-element
-  return <img src={team.flag_url} alt={team.name} className={`${size} rounded object-cover`} />;
+  return <img src={team.logo_url} alt={team.name} className={`${size} object-contain`} />;
 }
 
 function MatchHeader({ match }: { match: MatchWithTeams }) {
   const kickoff = new Date(match.kickoff_at);
+  const stageLabel =
+    match.stage === "group" && match.group_letter
+      ? `Group ${match.group_letter}`
+      : STAGE_LABEL[match.stage];
+  const finishedLabel =
+    match.pen_home != null
+      ? "Penalties"
+      : match.status_short === "AET"
+        ? "After extra time"
+        : "Full time";
+
   return (
     <div className="rounded-2xl border border-neutral-200 p-6 text-center dark:border-neutral-800">
-      <p className="mb-4 text-xs uppercase tracking-wide text-neutral-500">
-        {match.stage === "group" && match.group_letter
-          ? `Group ${match.group_letter}`
-          : STAGE_LABEL[match.stage]}
-        {match.venue ? ` · ${match.venue}` : ""}
+      <p className="mb-1 text-xs uppercase tracking-wide text-neutral-500">
+        {stageLabel}
+        {" · "}
+        {kickoff.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })}
+        {match.venue ? ` · ${match.venue}${match.venue_city ? `, ${match.venue_city}` : ""}` : ""}
       </p>
+      {match.referee && (
+        <p className="mb-4 text-xs text-neutral-400">Referee: {match.referee}</p>
+      )}
       <div className="flex items-center justify-center gap-6">
         <div className="flex w-40 flex-col items-center gap-2">
-          <Flag team={match.home_team} />
+          <Logo team={match.home_team} />
           <span className="font-semibold">{match.home_team?.name ?? "TBD"}</span>
         </div>
-        <div className="w-28">
+        <div className="w-32">
           {match.status === "scheduled" ? (
             <div className="text-lg font-semibold tabular-nums">
               {kickoff.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}
@@ -66,11 +91,29 @@ function MatchHeader({ match }: { match: MatchWithTeams }) {
             </span>
           )}
           {match.status === "finished" && (
-            <span className="text-xs text-neutral-500">Full time</span>
+            <div className="mt-1 space-y-0.5 text-xs text-neutral-500">
+              <div>{finishedLabel}</div>
+              {match.pen_home != null && (
+                <div className="font-semibold tabular-nums">
+                  Pens {match.pen_home} – {match.pen_away}
+                </div>
+              )}
+              {match.ht_home != null && (
+                <div className="tabular-nums">
+                  HT {match.ht_home} – {match.ht_away}
+                  {match.status_short !== "FT" && match.ft_home != null && (
+                    <span>
+                      {" "}
+                      · 90′ {match.ft_home} – {match.ft_away}
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
           )}
         </div>
         <div className="flex w-40 flex-col items-center gap-2">
-          <Flag team={match.away_team} />
+          <Logo team={match.away_team} />
           <span className="font-semibold">{match.away_team?.name ?? "TBD"}</span>
         </div>
       </div>
@@ -86,13 +129,16 @@ async function ScheduledView({ match }: { match: MatchWithTeams }) {
   if (!home || !away) {
     return <p className="text-sm text-neutral-500">Teams will be decided by the previous round.</p>;
   }
-  const [forms, prediction, priorMeetings] = await Promise.all([
-    getFormForTeams([home.id, away.id]),
+  const [forms, prediction, priorMeetings, teamSeasons] = await Promise.all([
+    getFormForTeams(match.season, [home.id, away.id]),
     getLatestPrediction(match.id),
     getPriorMeetings(home.id, away.id),
+    getTeamSeasons(match.season),
   ]);
   const homeForm = forms.get(home.id);
   const awayForm = forms.get(away.id);
+  const homeSeason = teamSeasons.find((t) => t.team_id === home.id);
+  const awaySeason = teamSeasons.find((t) => t.team_id === away.id);
 
   return (
     <div className="space-y-8">
@@ -101,8 +147,16 @@ async function ScheduledView({ match }: { match: MatchWithTeams }) {
           Head to head
         </h2>
         <div className="rounded-xl border border-neutral-200 px-4 dark:border-neutral-800">
-          <StatBar label="FIFA ranking" home={home.fifa_ranking} away={away.fifa_ranking} />
-          <StatBar label="Elo" home={Math.round(home.elo)} away={Math.round(away.elo)} />
+          <StatBar
+            label="FIFA ranking"
+            home={homeSeason?.fifa_ranking ?? null}
+            away={awaySeason?.fifa_ranking ?? null}
+          />
+          <StatBar
+            label="Elo"
+            home={homeSeason ? Math.round(homeSeason.elo) : null}
+            away={awaySeason ? Math.round(awaySeason.elo) : null}
+          />
           {homeForm && awayForm && (
             <>
               <StatBar label="Overall form" home={homeForm.overall_form} away={awayForm.overall_form} format={(v) => v.toFixed(1)} />
@@ -152,7 +206,7 @@ async function ScheduledView({ match }: { match: MatchWithTeams }) {
           // Official historical head-to-head (all-time, via API-Sports widget)
           <ApiSportsWidget data-type="h2h" data-h2h={`${home.id}-${away.id}`} />
         ) : priorMeetings.length === 0 ? (
-          <p className="text-sm text-neutral-500">No previous meetings in this tournament.</p>
+          <p className="text-sm text-neutral-500">No previous meetings in stored tournaments.</p>
         ) : (
           <ul className="space-y-1 text-sm">
             {priorMeetings.map((m) => (
@@ -188,10 +242,11 @@ async function LiveView({ match }: { match: MatchWithTeams }) {
 
   return (
     <div className="space-y-8">
-      {widgetsEnabled ? (
+      {widgetsEnabled && (
         // Official live view: events, lineups, team + player statistics
         <ApiSportsWidget data-type="game" data-game-id={String(match.id)} data-game-tab="statistics" />
-      ) : !latest ? (
+      )}
+      {!latest ? (
         <p className="text-sm text-neutral-500">Waiting for the first live snapshot…</p>
       ) : (
         <section>
@@ -200,7 +255,6 @@ async function LiveView({ match }: { match: MatchWithTeams }) {
           </h2>
           <div className="rounded-xl border border-neutral-200 px-4 dark:border-neutral-800">
             <StatBar label="Possession" home={stat("Ball Possession", home.id)} away={stat("Ball Possession", away.id)} format={(v) => `${v.toFixed(0)}%`} />
-            <StatBar label="xG" home={stat("expected_goals", home.id)} away={stat("expected_goals", away.id)} format={(v) => v.toFixed(2)} />
             <StatBar label="Shots" home={stat("Total Shots", home.id)} away={stat("Total Shots", away.id)} />
             <StatBar label="On target" home={stat("Shots on Goal", home.id)} away={stat("Shots on Goal", away.id)} />
             <StatBar label="Corners" home={stat("Corner Kicks", home.id)} away={stat("Corner Kicks", away.id)} />
@@ -213,8 +267,126 @@ async function LiveView({ match }: { match: MatchWithTeams }) {
       {snapshots.length > 0 && (
         <section className="grid gap-8 sm:grid-cols-2">
           <MomentumChart title="Shots momentum" data={momentum("Total Shots")} homeName={home.name} awayName={away.name} />
-          <MomentumChart title="xG momentum" data={momentum("expected_goals")} homeName={home.name} awayName={away.name} />
+          <MomentumChart title="Shots on target momentum" data={momentum("Shots on Goal")} homeName={home.name} awayName={away.name} />
         </section>
+      )}
+    </div>
+  );
+}
+
+// ── finished: events timeline ────────────────────────────────────────────────
+
+function eventIcon(e: MatchEvent): string {
+  if (e.type === "Goal") {
+    if (e.detail === "Own Goal") return "⊖ OG";
+    if (e.detail === "Penalty") return "⚽ (pen)";
+    if (e.detail === "Missed Penalty") return "⊘ pen miss";
+    return "⚽";
+  }
+  if (e.type === "Card") return e.detail === "Red Card" ? "🟥" : "🟨";
+  if (e.type === "subst") return "⇄";
+  if (e.type === "Var") return "VAR";
+  return e.type ?? "";
+}
+
+function EventsTimeline({ events, match }: { events: MatchEvent[]; match: MatchWithTeams }) {
+  const regular = events.filter((e) => e.comments !== "Penalty Shootout");
+  const shootout = events.filter((e) => e.comments === "Penalty Shootout");
+
+  const row = (e: MatchEvent) => {
+    const isHome = e.team_id === match.home_team_id;
+    const minute =
+      e.elapsed != null ? `${e.elapsed}${e.elapsed_extra ? `+${e.elapsed_extra}` : ""}′` : "";
+    const text = (
+      <span>
+        <span className="mr-1">{eventIcon(e)}</span>
+        <span className="font-medium">{e.player_name}</span>
+        {e.type === "subst" && e.assist_name && (
+          <span className="text-neutral-500"> ⟶ {e.assist_name}</span>
+        )}
+        {e.type === "Goal" && e.assist_name && (
+          <span className="text-neutral-500"> (assist: {e.assist_name})</span>
+        )}
+        {e.type === "Var" && <span className="text-neutral-500"> — {e.detail}</span>}
+      </span>
+    );
+    return (
+      <li key={e.id} className="grid grid-cols-[1fr_3.5rem_1fr] items-center gap-2 py-1 text-sm">
+        <span className="text-right">{isHome ? text : null}</span>
+        <span className="text-center text-xs tabular-nums text-neutral-400">{minute}</span>
+        <span>{!isHome ? text : null}</span>
+      </li>
+    );
+  };
+
+  return (
+    <section>
+      <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-neutral-500">
+        Timeline
+      </h2>
+      <ul className="rounded-xl border border-neutral-200 px-4 py-2 dark:border-neutral-800">
+        {regular.map(row)}
+      </ul>
+      {shootout.length > 0 && (
+        <>
+          <h3 className="mt-4 mb-2 text-xs font-semibold uppercase tracking-wide text-neutral-500">
+            Penalty shootout
+          </h3>
+          <ul className="rounded-xl border border-neutral-200 px-4 py-2 dark:border-neutral-800">
+            {shootout.map(row)}
+          </ul>
+        </>
+      )}
+    </section>
+  );
+}
+
+// ── finished: lineups ────────────────────────────────────────────────────────
+
+function LineupColumn({
+  team,
+  lineup,
+  players,
+}: {
+  team: Team;
+  lineup: MatchLineup | undefined;
+  players: MatchLineupPlayer[];
+}) {
+  const starters = players.filter((p) => p.starter);
+  const subs = players.filter((p) => !p.starter);
+  return (
+    <div>
+      <h3 className="mb-1 text-sm font-semibold">
+        {team.name}
+        {lineup?.formation && (
+          <span className="ml-2 font-normal text-neutral-500">{lineup.formation}</span>
+        )}
+      </h3>
+      {lineup?.coach_name && (
+        <p className="mb-2 text-xs text-neutral-500">Coach: {lineup.coach_name}</p>
+      )}
+      <ul className="space-y-0.5 text-sm">
+        {starters.map((p) => (
+          <li key={p.id} className="flex gap-2">
+            <span className="w-6 text-right tabular-nums text-neutral-400">{p.shirt_number}</span>
+            <span className="w-4 text-xs leading-5 text-neutral-400">{p.position}</span>
+            <span>{p.player_name}</span>
+          </li>
+        ))}
+      </ul>
+      {subs.length > 0 && (
+        <>
+          <p className="mt-3 mb-1 text-xs uppercase tracking-wide text-neutral-400">Substitutes</p>
+          <ul className="space-y-0.5 text-sm text-neutral-500">
+            {subs.map((p) => (
+              <li key={p.id} className="flex gap-2">
+                <span className="w-6 text-right tabular-nums text-neutral-400">{p.shirt_number}</span>
+                <span className="w-4 text-xs leading-5 text-neutral-400">{p.position}</span>
+                <span>{p.player_name}</span>
+              </li>
+            ))}
+          </ul>
+        </>
       )}
     </div>
   );
@@ -226,27 +398,28 @@ async function FinishedView({ match }: { match: MatchWithTeams }) {
   const home = match.home_team!;
   const away = match.away_team!;
 
-  if (widgetsEnabled) {
-    // Official post-match view: events, lineups, team + player statistics.
-    // Skips the Supabase fetches entirely — Track 2 data still powers /rankings.
-    return (
-      <ApiSportsWidget
-        data-type="game"
-        data-game-id={String(match.id)}
-        data-game-tab="statistics"
-      />
-    );
-  }
-
-  const [teamStats, playerStats] = await Promise.all([
+  const [teamStats, playerStats, events, lineups] = await Promise.all([
     getTeamMatchStats(match.id),
     getPlayerMatchStats(match.id),
+    getMatchEvents(match.id),
+    getMatchLineups(match.id),
   ]);
   const hs = teamStats.find((s) => s.team_id === home.id);
   const as = teamStats.find((s) => s.team_id === away.id);
 
   return (
     <div className="space-y-8">
+      {widgetsEnabled && (
+        // Official post-match view — owned Track 2 data renders below it.
+        <ApiSportsWidget
+          data-type="game"
+          data-game-id={String(match.id)}
+          data-game-tab="statistics"
+        />
+      )}
+
+      {events.length > 0 && <EventsTimeline events={events} match={match} />}
+
       {hs && as && (
         <section>
           <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-neutral-500">
@@ -254,55 +427,81 @@ async function FinishedView({ match }: { match: MatchWithTeams }) {
           </h2>
           <div className="rounded-xl border border-neutral-200 px-4 dark:border-neutral-800">
             <StatBar label="Possession" home={hs.possession} away={as.possession} format={(v) => `${v.toFixed(0)}%`} />
-            <StatBar label="xG" home={hs.xg} away={as.xg} format={(v) => v.toFixed(2)} />
             <StatBar label="Shots" home={hs.shots} away={as.shots} />
             <StatBar label="On target" home={hs.shots_on_target} away={as.shots_on_target} />
+            <StatBar label="Off target" home={hs.shots_off_target} away={as.shots_off_target} />
+            <StatBar label="Blocked shots" home={hs.shots_blocked} away={as.shots_blocked} />
+            <StatBar label="Shots inside box" home={hs.shots_inside_box} away={as.shots_inside_box} />
             <StatBar label="Corners" home={hs.corners} away={as.corners} />
+            <StatBar label="Offsides" home={hs.offsides} away={as.offsides} />
             <StatBar label="Fouls" home={hs.fouls} away={as.fouls} />
+            <StatBar label="Yellow cards" home={hs.yellow_cards} away={as.yellow_cards} />
+            <StatBar label="Red cards" home={hs.red_cards} away={as.red_cards} />
+            <StatBar label="Saves" home={hs.saves} away={as.saves} />
             <StatBar label="Passes" home={hs.passes} away={as.passes} />
             <StatBar label="Pass accuracy" home={hs.pass_accuracy} away={as.pass_accuracy} format={(v) => `${v.toFixed(0)}%`} />
           </div>
         </section>
       )}
 
-      <section>
-        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-neutral-500">
-          Player ratings
-        </h2>
-        <div className="grid gap-6 sm:grid-cols-2">
-          {[home, away].map((team) => (
-            <div key={team.id}>
-              <h3 className="mb-2 text-sm font-semibold">{team.name}</h3>
-              <table className="w-full text-sm">
-                <thead className="text-left text-xs uppercase tracking-wide text-neutral-500">
-                  <tr>
-                    <th className="py-1 font-normal">Player</th>
-                    <th className="py-1 text-right font-normal">Min</th>
-                    <th className="py-1 text-right font-normal">G</th>
-                    <th className="py-1 text-right font-normal">A</th>
-                    <th className="py-1 text-right font-normal">Rating</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {playerStats
-                    .filter((p) => p.team_id === team.id)
-                    .map((p) => (
-                      <tr key={p.id} className="border-t border-neutral-100 dark:border-neutral-900">
-                        <td className="py-1">{p.player?.name ?? p.player_id}</td>
-                        <td className="py-1 text-right tabular-nums">{p.minutes}</td>
-                        <td className="py-1 text-right tabular-nums">{p.goals || ""}</td>
-                        <td className="py-1 text-right tabular-nums">{p.assists || ""}</td>
-                        <td className="py-1 text-right font-semibold tabular-nums">
-                          {p.rating?.toFixed(1) ?? "–"}
-                        </td>
-                      </tr>
-                    ))}
-                </tbody>
-              </table>
-            </div>
-          ))}
-        </div>
-      </section>
+      {lineups.players.length > 0 && (
+        <section>
+          <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-neutral-500">
+            Lineups
+          </h2>
+          <div className="grid gap-6 sm:grid-cols-2">
+            {[home, away].map((team) => (
+              <LineupColumn
+                key={team.id}
+                team={team}
+                lineup={lineups.teams.find((l) => l.team_id === team.id)}
+                players={lineups.players.filter((p) => p.team_id === team.id)}
+              />
+            ))}
+          </div>
+        </section>
+      )}
+
+      {playerStats.length > 0 && (
+        <section>
+          <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-neutral-500">
+            Player ratings
+          </h2>
+          <div className="grid gap-6 sm:grid-cols-2">
+            {[home, away].map((team) => (
+              <div key={team.id}>
+                <h3 className="mb-2 text-sm font-semibold">{team.name}</h3>
+                <table className="w-full text-sm">
+                  <thead className="text-left text-xs uppercase tracking-wide text-neutral-500">
+                    <tr>
+                      <th className="py-1 font-normal">Player</th>
+                      <th className="py-1 text-right font-normal">Min</th>
+                      <th className="py-1 text-right font-normal">G</th>
+                      <th className="py-1 text-right font-normal">A</th>
+                      <th className="py-1 text-right font-normal">Rating</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {playerStats
+                      .filter((p) => p.team_id === team.id && (p.minutes ?? 0) > 0)
+                      .map((p) => (
+                        <tr key={p.id} className="border-t border-neutral-100 dark:border-neutral-900">
+                          <td className="py-1">{p.player?.name ?? p.player_id}</td>
+                          <td className="py-1 text-right tabular-nums">{p.minutes}</td>
+                          <td className="py-1 text-right tabular-nums">{p.goals || ""}</td>
+                          <td className="py-1 text-right tabular-nums">{p.assists || ""}</td>
+                          <td className="py-1 text-right font-semibold tabular-nums">
+                            {p.rating?.toFixed(1) ?? "–"}
+                          </td>
+                        </tr>
+                      ))}
+                  </tbody>
+                </table>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
     </div>
   );
 }

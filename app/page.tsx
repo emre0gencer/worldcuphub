@@ -1,5 +1,6 @@
 import MatchCard from "@/components/MatchCard";
 import { getAllMatches } from "@/lib/queries";
+import { resolveSeason } from "@/lib/season";
 import type { MatchWithTeams } from "@/lib/types";
 
 // Live scores must always be fresh — render per request.
@@ -18,13 +19,20 @@ function groupByDay(matches: MatchWithTeams[]): Map<string, MatchWithTeams[]> {
   return byDay;
 }
 
-export default async function HomePage() {
-  const matches = await getAllMatches();
+export default async function HomePage({ searchParams }: PageProps<"/">) {
+  const sp = await searchParams;
+  const season = resolveSeason(sp.season);
+  const matches = await getAllMatches(season);
   const live = matches.filter((m) => m.status === "live");
   const rest = matches.filter((m) => m.status !== "live");
 
   return (
     <div className="space-y-10">
+      {matches.length === 0 && (
+        <p className="text-sm text-neutral-500">
+          No fixtures for {season} yet. Check back once the schedule is published.
+        </p>
+      )}
       {live.length > 0 && (
         <section>
           <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-red-600">

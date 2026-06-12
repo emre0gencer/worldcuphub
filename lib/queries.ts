@@ -1,13 +1,19 @@
 import { getSupabase } from "./supabase";
 import type {
   Match,
+  MatchEvent,
+  MatchLineup,
+  MatchLineupPlayer,
   MatchSnapshot,
   MatchWithTeams,
   PlayerMatchStats,
+  PlayerSeasonStats,
   Prediction,
   SnapshotStatEntry,
+  StandingsRow,
   TeamForm,
   TeamMatchStats,
+  TeamSeason,
 } from "./types";
 
 const MATCH_WITH_TEAMS = `
@@ -16,10 +22,11 @@ const MATCH_WITH_TEAMS = `
   away_team:teams!matches_away_team_id_fkey (*)
 `;
 
-export async function getAllMatches(): Promise<MatchWithTeams[]> {
+export async function getAllMatches(season: number): Promise<MatchWithTeams[]> {
   const { data, error } = await getSupabase()
     .from("matches")
     .select(MATCH_WITH_TEAMS)
+    .eq("season", season)
     .order("kickoff_at", { ascending: true });
   if (error) throw error;
   return data as unknown as MatchWithTeams[];
@@ -64,11 +71,72 @@ export async function getPlayerMatchStats(matchId: number): Promise<PlayerMatchS
   return data as unknown as PlayerMatchStats[];
 }
 
-/** Latest team_form row per team (most recent as_of_date). */
-export async function getLatestForm(): Promise<TeamForm[]> {
+export async function getMatchEvents(matchId: number): Promise<MatchEvent[]> {
+  const { data, error } = await getSupabase()
+    .from("match_events")
+    .select("*")
+    .eq("match_id", matchId)
+    .order("order_index", { ascending: true });
+  if (error) throw error;
+  return data as MatchEvent[];
+}
+
+export async function getMatchLineups(
+  matchId: number,
+): Promise<{ teams: MatchLineup[]; players: MatchLineupPlayer[] }> {
+  const [teamsRes, playersRes] = await Promise.all([
+    getSupabase().from("match_lineups").select("*").eq("match_id", matchId),
+    getSupabase()
+      .from("match_lineup_players")
+      .select("*")
+      .eq("match_id", matchId)
+      .order("grid", { ascending: true }),
+  ]);
+  if (teamsRes.error) throw teamsRes.error;
+  if (playersRes.error) throw playersRes.error;
+  return {
+    teams: teamsRes.data as MatchLineup[],
+    players: playersRes.data as MatchLineupPlayer[],
+  };
+}
+
+/** Stored API standings copy — cross-checked against tables computed from matches. */
+export async function getStoredStandings(season: number): Promise<StandingsRow[]> {
+  const { data, error } = await getSupabase()
+    .from("standings")
+    .select("*, team:teams (*)")
+    .eq("season", season)
+    .order("group_name", { ascending: true })
+    .order("rank", { ascending: true });
+  if (error) throw error;
+  return data as unknown as StandingsRow[];
+}
+
+export async function getTeamSeasons(season: number): Promise<TeamSeason[]> {
+  const { data, error } = await getSupabase()
+    .from("team_seasons")
+    .select("*, team:teams (*)")
+    .eq("season", season);
+  if (error) throw error;
+  return data as unknown as TeamSeason[];
+}
+
+/** Stored API per-player season stats (powers leaderboards). */
+export async function getPlayerSeasonStats(season: number): Promise<PlayerSeasonStats[]> {
+  const { data, error } = await getSupabase()
+    .from("player_season_stats")
+    .select("*, player:players (*), team:teams (*)")
+    .eq("season", season);
+  if (error) throw error;
+  return data as unknown as PlayerSeasonStats[];
+}
+
+/** Latest team_form row per team (most recent as_of_date) for one season. */
+export async function getLatestForm(season: number): Promise<TeamForm[]> {
   const { data, error } = await getSupabase()
     .from("team_form")
     .select("*")
+    .eq("season", season)
     .order("as_of_date", { ascending: false });
   if (error) throw error;
   const latest = new Map<number, TeamForm>();
@@ -79,10 +147,11 @@ export async function getLatestForm(): Promise<TeamForm[]> {
 }
 
 /** Full team_form history (for trend charts). */
-export async function getFormHistory(teamIds?: number[]): Promise<TeamForm[]> {
+export async function getFormHistory(season: number, teamIds?: number[]): Promise<TeamForm[]> {
   let query = getSupabase()
     .from("team_form")
     .select("*")
+    .eq("season", season)
     .order("as_of_date", { ascending: true });
   if (teamIds && teamIds.length > 0) query = query.in("team_id", teamIds);
   const { data, error } = await query;
@@ -103,10 +172,11 @@ export async function getLatestPrediction(matchId: number): Promise<Prediction |
   return data as Prediction | null;
 }
 
-export async function getLatestPredictions(): Promise<Prediction[]> {
+export async function getLatestPredictions(season: number): Promise<Prediction[]> {
   const { data, error } = await getSupabase()
     .from("predictions")
     .select("*")
+    .eq("season", season)
     .order("generated_at", { ascending: false });
   if (error) throw error;
   const latest = new Map<number, Prediction>();
@@ -116,7 +186,7 @@ export async function getLatestPredictions(): Promise<Prediction[]> {
   return [...latest.values()];
 }
 
-/** Prior meetings between two teams within the tournament dataset. */
+/** Prior meetings between two teams across stored tournaments. */
 export async function getPriorMeetings(teamA: number, teamB: number): Promise<Match[]> {
   const { data, error } = await getSupabase()
     .from("matches")
@@ -130,10 +200,14 @@ export async function getPriorMeetings(teamA: number, teamB: number): Promise<Ma
 }
 
 /** Latest form rows for a pair of teams (pre-match head-to-head). */
-export async function getFormForTeams(teamIds: number[]): Promise<Map<number, TeamForm>> {
+export async function getFormForTeams(
+  season: number,
+  teamIds: number[],
+): Promise<Map<number, TeamForm>> {
   const { data, error } = await getSupabase()
     .from("team_form")
     .select("*")
+    .eq("season", season)
     .in("team_id", teamIds)
     .order("as_of_date", { ascending: false });
   if (error) throw error;

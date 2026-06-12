@@ -2,7 +2,7 @@
 
 # World Cup HUB
 
-Read-only web app + data platform for the 2026 FIFA World Cup. **PROJECT_SPEC.md is the single source of truth** — all decisions there are locked; do not re-derive them.
+Read-only web app + data platform for the 2026 FIFA World Cup. **PROJECT_SPEC.md is the single source of truth**, with **PROJECT_SPEC_2.md (2022 demo phase) overriding it where they differ** — all decisions there are locked; do not re-derive them.
 
 ## Stack & architecture
 
@@ -24,9 +24,9 @@ Read-only web app + data platform for the 2026 FIFA World Cup. **PROJECT_SPEC.md
 
 - `worker/worldcup_worker/ingest.py` — long-running live poll loop (60s per live match, ~300s fixture discovery) + finalize step. Run: `python -m worldcup_worker.ingest`
 - `worker/worldcup_worker/analytics.py` — Form Score math (spec §5, steps 1–7 implemented exactly) + baseline upset model. Pure functions over dict rows; the Supabase-backed job is `run()`. Run: `python -m worldcup_worker.analytics`
-- `worker/worldcup_worker/generate_seed.py` — deterministic mock data → `supabase/seed.sql` (do not edit seed.sql by hand). Reuses the real analytics functions so Track 3 mock data is internally consistent.
-- `lib/queries.ts` — all frontend Supabase reads; `lib/types.ts` mirrors the schema.
-- Pages: `app/page.tsx` (home match list), `app/matches/[id]/page.tsx` (scheduled/live/finished states), `app/rankings/page.tsx`, `app/standings/page.tsx` (group tables).
+- `worker/worldcup_worker/backfill.py` — full-season ingestion (`python -m worldcup_worker.backfill --season 2022 [--force]`); shares `pipeline.py` building blocks with the live finalize step.
+- `lib/queries.ts` — all frontend Supabase reads (season-parameterized); `lib/types.ts` mirrors the schema; `lib/season.ts` — `SEASONS`/`DEFAULT_SEASON`/`resolveSeason(searchParam)`.
+- Pages (all season-aware via `?season=` + `SeasonSwitcher` in the nav): `app/page.tsx` (home match list), `app/matches/[id]/page.tsx` (scheduled/live/finished states; finished = widget + owned timeline/stats/lineups/ratings), `app/standings/page.tsx` (computed group tables cross-checked against stored API standings + knockout bracket), `app/players/page.tsx` (leaderboards from `player_season_stats`), `app/rankings/page.tsx` (Form Scores).
 - `components/widgets/` — API-Sports widget integration (see below).
 
 ## API-Sports widgets (display-only enrichment)
@@ -41,7 +41,9 @@ Read-only web app + data platform for the 2026 FIFA World Cup. **PROJECT_SPEC.md
 
 - **Next.js 16 differs from training data** — read `node_modules/next/dist/docs/` before using unfamiliar APIs. `params`/`searchParams` are Promises; `PageProps<'/route'>` global helpers exist (run `npx next typegen` after adding routes).
 - `cacheComponents` is NOT enabled; pages use `export const dynamic = "force-dynamic"` so Supabase reads are always fresh.
-- All config from env vars, never hard-coded. Names per spec §8: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` (frontend); `API_FOOTBALL_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_KEY` (worker). `.env.local` / `worker/.env` are gitignored.
+- All config from env vars, never hard-coded. Names per spec §8: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `NEXT_PUBLIC_DEFAULT_SEASON` (frontend); `API_FOOTBALL_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_KEY` (worker). `.env.local` / `worker/.env` are gitignored.
+- Season model: every table carries `season`; pages resolve it from `?season=` via `resolveSeason` (falls back to `NEXT_PUBLIC_DEFAULT_SEASON`, currently 2022). Match pages are season-implicit (fixture id). 2026 reuses the same code paths — no duplication.
+- No xG for World Cup fixtures (verified in discovery) — Form Score uses the reweighted no-xG composites (`baseline-v2-noxg`).
 - Analytics join rule: a team's defending stats come from the **opponent's row** of the same match; `opponent.goals_for == team.goals_against` is checked as a consistency guard.
 - Form display scale: `clamp(50 + 15·z, 0, 100)` — 50 = tournament average. Surface `sample_size` in UI when n < 3.
 - Design: minimal, typographic; FotMob as structural reference only.
@@ -50,11 +52,13 @@ Read-only web app + data platform for the 2026 FIFA World Cup. **PROJECT_SPEC.md
 ## Local dev
 
 ```
-supabase start && supabase db reset      # applies migrations + seed.sql (mock data, no API keys needed)
 npm run dev                              # frontend (needs NEXT_PUBLIC_* in .env.local)
 cd worker && pip install -r requirements.txt
-python -m worldcup_worker.generate_seed  # regenerate seed.sql after schema changes
+python -m worldcup_worker.backfill --season 2022   # one-shot full-season ingestion
+python -m worldcup_worker.analytics --season 2022  # recompute Track 3
 ```
+
+Mock seed (`supabase/seed.sql` + `generate_seed.py`) was removed in the 2022-demo rebuild — the hosted Supabase project holds real backfilled 2022 data.
 
 ## User workflow
 

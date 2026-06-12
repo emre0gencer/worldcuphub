@@ -2,8 +2,9 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import ApiSportsWidget from "@/components/widgets/ApiSportsWidget";
 import { widgetsEnabled } from "@/components/widgets/widgets-enabled";
-import { getAllMatches } from "@/lib/queries";
-import type { MatchWithTeams, Team } from "@/lib/types";
+import { getAllMatches, getStoredStandings } from "@/lib/queries";
+import { resolveSeason } from "@/lib/season";
+import type { MatchWithTeams, StandingsRow, Team } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
@@ -11,7 +12,7 @@ export const metadata: Metadata = {
   title: "Standings — World Cup HUB",
 };
 
-// ── fallback: group tables computed from finished group-stage matches ────────
+// ── group tables computed from owned finished group-stage results ────────────
 
 interface TableRow {
   team: Team;
@@ -27,12 +28,14 @@ interface TableRow {
 
 function buildGroupTables(matches: MatchWithTeams[]): Map<string, TableRow[]> {
   const rows = new Map<number, TableRow>();
+  const groupOf = new Map<number, string>();
   const groupMatches = matches.filter(
-    (m) => m.stage === "group" && m.home_team && m.away_team,
+    (m) => m.stage === "group" && m.home_team && m.away_team && m.group_letter,
   );
 
   for (const m of groupMatches) {
     for (const team of [m.home_team!, m.away_team!]) {
+      groupOf.set(team.id, m.group_letter!);
       if (!rows.has(team.id)) {
         rows.set(team.id, {
           team,
@@ -88,7 +91,7 @@ function buildGroupTables(matches: MatchWithTeams[]): Map<string, TableRow[]> {
 
   const groups = new Map<string, TableRow[]>();
   for (const row of rows.values()) {
-    const letter = row.team.group_letter;
+    const letter = groupOf.get(row.team.id)!;
     if (!groups.has(letter)) groups.set(letter, []);
     groups.get(letter)!.push(row);
   }
@@ -102,6 +105,29 @@ function buildGroupTables(matches: MatchWithTeams[]): Map<string, TableRow[]> {
     );
   }
   return new Map([...groups.entries()].sort(([a], [b]) => a.localeCompare(b)));
+}
+
+/** Compare computed tables to the stored API standings copy. */
+function crossCheck(groups: Map<string, TableRow[]>, stored: StandingsRow[]): string[] {
+  const issues: string[] = [];
+  const storedById = new Map(stored.map((s) => [s.team_id, s]));
+  for (const [letter, table] of groups) {
+    table.forEach((row, i) => {
+      const s = storedById.get(row.team.id);
+      if (!s) {
+        issues.push(`${row.team.name}: missing from stored standings`);
+        return;
+      }
+      const diffs: string[] = [];
+      if (s.points !== row.points) diffs.push(`points ${row.points}≠${s.points}`);
+      if (s.played !== row.played) diffs.push(`played ${row.played}≠${s.played}`);
+      if (s.goals_diff !== row.gf - row.ga) diffs.push(`GD ${row.gf - row.ga}≠${s.goals_diff}`);
+      if (s.rank !== i + 1) diffs.push(`rank ${i + 1}≠${s.rank}`);
+      if (s.group_name && !s.group_name.endsWith(letter)) diffs.push(`group ${letter}≠${s.group_name}`);
+      if (diffs.length > 0) issues.push(`${row.team.name}: ${diffs.join(", ")}`);
+    });
+  }
+  return issues;
 }
 
 const FORM_STYLE: Record<string, string> = {
@@ -134,9 +160,9 @@ function GroupTable({ letter, rows }: { letter: string; rows: TableRow[] }) {
             <tr key={r.team.id} className="border-t border-neutral-100 dark:border-neutral-900">
               <td className="py-1.5">
                 <span className="flex items-center gap-2">
-                  {r.team.flag_url && (
+                  {r.team.logo_url && (
                     // eslint-disable-next-line @next/next/no-img-element
-                    <img src={r.team.flag_url} alt="" className="h-3.5 w-5 rounded-sm object-cover" />
+                    <img src={r.team.logo_url} alt="" className="h-4 w-4 object-contain" />
                   )}
                   {r.team.name}
                 </span>
@@ -167,45 +193,157 @@ function GroupTable({ letter, rows }: { letter: string; rows: TableRow[] }) {
   );
 }
 
+// ── knockout bracket ─────────────────────────────────────────────────────────
+
+const KO_STAGES: { stage: string; label: string }[] = [
+  { stage: "R32", label: "Round of 32" },
+  { stage: "R16", label: "Round of 16" },
+  { stage: "QF", label: "Quarter-finals" },
+  { stage: "SF", label: "Semi-finals" },
+  { stage: "third_place", label: "Third place" },
+  { stage: "final", label: "Final" },
+];
+
+function BracketTeam({
+  team,
+  score,
+  pens,
+  winner,
+}: {
+  team: Team | null;
+  score: number | null;
+  pens: number | null;
+  winner: boolean;
+}) {
+  return (
+    <div
+      className={`flex items-center justify-between gap-2 ${winner ? "font-semibold" : "text-neutral-500"}`}
+    >
+      <span className="flex min-w-0 items-center gap-1.5">
+        {team?.logo_url && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={team.logo_url} alt="" className="h-3.5 w-3.5 object-contain" />
+        )}
+        <span className="truncate">{team?.name ?? "TBD"}</span>
+      </span>
+      <span className="tabular-nums">
+        {score ?? ""}
+        {pens != null && <span className="text-xs text-neutral-400"> ({pens})</span>}
+      </span>
+    </div>
+  );
+}
+
+function Bracket({ matches }: { matches: MatchWithTeams[] }) {
+  const columns = KO_STAGES.map((s) => ({
+    ...s,
+    matches: matches
+      .filter((m) => m.stage === s.stage)
+      .sort((a, b) => a.kickoff_at.localeCompare(b.kickoff_at)),
+  })).filter((c) => c.matches.length > 0);
+
+  if (columns.length === 0) return null;
+
+  return (
+    <section>
+      <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-neutral-500">
+        Knockout stage
+      </h2>
+      <div className="flex gap-4 overflow-x-auto pb-2">
+        {columns.map((col) => (
+          <div key={col.stage} className="w-52 shrink-0">
+            <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-neutral-400">
+              {col.label}
+            </h3>
+            <div className="flex h-full flex-col justify-around gap-3 pb-8">
+              {col.matches.map((m) => (
+                <Link
+                  key={m.id}
+                  href={`/matches/${m.id}`}
+                  className="block space-y-1 rounded-lg border border-neutral-200 p-2 text-sm transition-colors hover:border-neutral-400 dark:border-neutral-800 dark:hover:border-neutral-600"
+                >
+                  <BracketTeam
+                    team={m.home_team}
+                    score={m.home_score}
+                    pens={m.pen_home}
+                    winner={m.home_winner === true}
+                  />
+                  <BracketTeam
+                    team={m.away_team}
+                    score={m.away_score}
+                    pens={m.pen_away}
+                    winner={m.home_winner === false}
+                  />
+                </Link>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 // ── page ─────────────────────────────────────────────────────────────────────
 
-export default async function StandingsPage() {
+export default async function StandingsPage({ searchParams }: PageProps<"/standings">) {
+  const sp = await searchParams;
+  const season = resolveSeason(sp.season);
+
+  const [matches, stored] = await Promise.all([
+    getAllMatches(season),
+    getStoredStandings(season),
+  ]);
+  const groups = buildGroupTables(matches);
+  const issues = groups.size > 0 ? crossCheck(groups, stored) : [];
+
   return (
-    <div className="space-y-8">
+    <div className="space-y-10">
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Standings</h1>
         <p className="text-sm text-neutral-500">
-          Group tables for the 2026 FIFA World Cup.{" "}
-          <Link href="/rankings" className="underline hover:text-neutral-900 dark:hover:text-neutral-100">
+          Group tables computed from match results, cross-checked against the official
+          standings.{" "}
+          <Link href={`/rankings?season=${season}`} className="underline hover:text-neutral-900 dark:hover:text-neutral-100">
             Form rankings
           </Link>{" "}
           are computed separately from match statistics.
         </p>
       </div>
 
-      {widgetsEnabled ? (
-        // Official standings with recent form, team modals on click
-        <ApiSportsWidget data-type="standings" data-league="1" data-season="2026" />
-      ) : (
-        <FallbackStandings />
+      {issues.length > 0 && (
+        <div className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-200">
+          <p className="mb-1 font-semibold">
+            Cross-check: computed tables disagree with stored API standings
+          </p>
+          <ul className="list-inside list-disc">
+            {issues.map((issue) => (
+              <li key={issue}>{issue}</li>
+            ))}
+          </ul>
+        </div>
       )}
-    </div>
-  );
-}
 
-async function FallbackStandings() {
-  const matches = await getAllMatches();
-  const groups = buildGroupTables(matches);
+      {groups.size === 0 ? (
+        <p className="text-sm text-neutral-500">No group-stage matches found for {season}.</p>
+      ) : (
+        <div className="grid gap-8 sm:grid-cols-2">
+          {[...groups.entries()].map(([letter, rows]) => (
+            <GroupTable key={letter} letter={letter} rows={rows} />
+          ))}
+        </div>
+      )}
 
-  if (groups.size === 0) {
-    return <p className="text-sm text-neutral-500">No group-stage matches found.</p>;
-  }
+      <Bracket matches={matches} />
 
-  return (
-    <div className="grid gap-8 sm:grid-cols-2">
-      {[...groups.entries()].map(([letter, rows]) => (
-        <GroupTable key={letter} letter={letter} rows={rows} />
-      ))}
+      {widgetsEnabled && (
+        <section>
+          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-neutral-500">
+            Official standings widget
+          </h2>
+          <ApiSportsWidget data-type="standings" data-league="1" data-season={String(season)} />
+        </section>
+      )}
     </div>
   );
 }

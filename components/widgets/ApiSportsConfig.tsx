@@ -1,6 +1,7 @@
 "use client";
 
 import Script from "next/script";
+import { DEFAULT_SEASON } from "@/lib/season";
 import { widgetsEnabled } from "./widgets-enabled";
 
 /**
@@ -34,7 +35,7 @@ export default function ApiSportsConfig() {
         data-show-errors="false"
         data-refresh="60"
         data-league="1"
-        data-season="2026"
+        data-season={String(DEFAULT_SEASON)}
         data-game-tab="statistics"
         data-team-statistics="true"
         data-team-squad="true"

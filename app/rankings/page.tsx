@@ -7,6 +7,7 @@ import {
   getLatestForm,
   getLatestPredictions,
 } from "@/lib/queries";
+import { resolveSeason } from "@/lib/season";
 import type { Team, TeamForm } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -36,9 +37,9 @@ function RankingTable({
             >
               <div className="flex items-center gap-2 min-w-0">
                 <span className="w-5 text-right text-xs tabular-nums text-neutral-400">{i + 1}</span>
-                {team?.flag_url && (
+                {team?.logo_url && (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img src={team.flag_url} alt="" className="h-3.5 w-5 rounded-[2px] object-cover" />
+                  <img src={team.logo_url} alt="" className="h-3.5 w-3.5 object-contain" />
                 )}
                 <span className="truncate text-sm">{team?.name ?? f.team_id}</span>
               </div>
@@ -51,11 +52,13 @@ function RankingTable({
   );
 }
 
-export default async function RankingsPage() {
+export default async function RankingsPage({ searchParams }: PageProps<"/rankings">) {
+  const sp = await searchParams;
+  const season = resolveSeason(sp.season);
   const [latestForm, matches, predictions] = await Promise.all([
-    getLatestForm(),
-    getAllMatches(),
-    getLatestPredictions(),
+    getLatestForm(season),
+    getAllMatches(season),
+    getLatestPredictions(season),
   ]);
 
   const teams = new Map<number, Team>();
@@ -66,7 +69,7 @@ export default async function RankingsPage() {
 
   // Trend chart: form history of the current top 6 overall
   const top6 = [...latestForm].sort((a, b) => b.overall_form - a.overall_form).slice(0, 6);
-  const history = await getFormHistory(top6.map((f) => f.team_id));
+  const history = await getFormHistory(season, top6.map((f) => f.team_id));
   const series: FormTrendSeries[] = top6.map((f) => ({
     teamName: teams.get(f.team_id)?.name ?? String(f.team_id),
     points: history
@@ -90,6 +93,10 @@ export default async function RankingsPage() {
           small sample sizes (n&lt;3) are noisy.
         </p>
       </section>
+
+      {latestForm.length === 0 && (
+        <p className="text-sm text-neutral-500">No form data for {season} yet.</p>
+      )}
 
       <div className="grid gap-8 md:grid-cols-3">
         <RankingTable title="Overall form" rows={latestForm} teams={teams} value={(f) => f.overall_form} />

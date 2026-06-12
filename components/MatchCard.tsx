@@ -7,22 +7,34 @@ const STAGE_LABEL: Record<string, string> = {
   R16: "Round of 16",
   QF: "Quarter-final",
   SF: "Semi-final",
+  third_place: "Third place",
   final: "Final",
 };
 
-function TeamRow({ team, score }: { team: Team | null; score: number | null }) {
+function TeamRow({
+  team,
+  score,
+  pens,
+}: {
+  team: Team | null;
+  score: number | null;
+  pens: number | null;
+}) {
   return (
     <div className="flex items-center justify-between gap-3">
       <div className="flex items-center gap-2 min-w-0">
-        {team?.flag_url ? (
+        {team?.logo_url ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={team.flag_url} alt="" className="h-4 w-6 rounded-[2px] object-cover" />
+          <img src={team.logo_url} alt="" className="h-4 w-6 rounded-[2px] object-cover" />
         ) : (
           <span className="h-4 w-6 rounded-[2px] bg-neutral-200 dark:bg-neutral-800" />
         )}
         <span className="truncate text-sm font-medium">{team?.name ?? "TBD"}</span>
       </div>
-      <span className="text-sm tabular-nums font-semibold">{score ?? ""}</span>
+      <span className="text-sm tabular-nums font-semibold">
+        {score ?? ""}
+        {pens != null && <span className="text-neutral-400 font-normal"> ({pens})</span>}
+      </span>
     </div>
   );
 }
@@ -46,7 +58,7 @@ export default function MatchCard({ match }: { match: MatchWithTeams }) {
             LIVE
           </span>
         ) : match.status === "finished" ? (
-          <span>FT</span>
+          <span>{match.pen_home != null ? "PEN" : match.status_short === "AET" ? "AET" : "FT"}</span>
         ) : (
           <span className="tabular-nums">
             {kickoff.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}
@@ -54,8 +66,8 @@ export default function MatchCard({ match }: { match: MatchWithTeams }) {
         )}
       </div>
       <div className="space-y-2">
-        <TeamRow team={match.home_team} score={match.home_score} />
-        <TeamRow team={match.away_team} score={match.away_score} />
+        <TeamRow team={match.home_team} score={match.home_score} pens={match.pen_home} />
+        <TeamRow team={match.away_team} score={match.away_score} pens={match.pen_away} />
       </div>
     </Link>
   );
