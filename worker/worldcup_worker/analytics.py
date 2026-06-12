@@ -1,22 +1,33 @@
 """Track 3 analytics job: Form Scores + the baseline statistical upset model.
 
-Implements PROJECT_SPEC.md §5 exactly. The computation is written as pure
-functions over plain dict rows so the same code drives both the scheduled
-batch job (reading/writing Supabase) and offline mock-data generation.
+Implements PROJECT_SPEC.md §5 with the Phase-1-approved reweighting from
+PROJECT_SPEC_2.md decision #4: API-Football returns NO xG for World Cup
+fixtures (verified against real 2022 responses — see discovery/FIELD_INVENTORY.md),
+so the xG terms are scratched and their weight redistributed onto
+goals / shots-on-target / shots:
 
-Run: python -m worldcup_worker.analytics
+    A(m) = 0.40·z(adjA_goals) + 0.30·z(adjA_sot) + 0.20·z(adjA_shots)
+         + 0.05·z(corners) + 0.05·z(pass_accuracy)
+    D(m) = 0.45·z(adjD_goals) + 0.35·z(adjD_sot) + 0.20·z(adjD_shots)
+
+All other steps (rolling opponent baselines with Elo-implied matchday-1 prior,
+z-score normalization, recency rho=0.7, shrinkage n/(n+2), display scale
+clamp(50+15z)) are unchanged. Season-parameterized: the same job serves 2022
+(demo) and 2026 (live).
+
+Run: python -m worldcup_worker.analytics --season 2022
 """
 
+import argparse
 import logging
 import math
 from collections import defaultdict
 from datetime import date, datetime, timezone
 from statistics import mean, pstdev
-from typing import Any
 
 log = logging.getLogger("analytics")
 
-MODEL_VERSION = "baseline-v1"
+MODEL_VERSION = "baseline-v2-noxg"
 
 RHO = 0.7            # Step 5 recency decay (newest match weight = 1)
 SHRINK_K = 2         # Step 6 pseudo-count
@@ -28,8 +39,11 @@ ELO_PRIOR_SCALE = 0.10 / 100.0
 UPSET_A = 1.0
 UPSET_B = 0.5
 
-# Stats used for opponent baselines: (column, created-vs-allowed handled via row sides)
-BASELINE_STATS = ("xg", "goals_for", "shots_on_target", "shots")
+# Stats used for opponent baselines (xg removed — not provided by the API).
+BASELINE_STATS = ("goals_for", "shots_on_target", "shots")
+
+# Columns the composites read; None (API "none recorded") is coerced to 0 with a report.
+STAT_COLUMNS = ("goals_for", "shots_on_target", "shots", "corners", "pass_accuracy")
 
 
 def sigmoid(x: float) -> float:
@@ -129,12 +143,10 @@ def compute_form(
                 "match_id": r["match_id"],
                 "kickoff": kickoff,
                 # Attacking over/under-performance for team T vs opponent OPP
-                "adjA_xg": r["xg"] - opp_base["xg_A"],
                 "adjA_goals": r["goals_for"] - opp_base["goals_for_A"],
                 "adjA_sot": r["shots_on_target"] - opp_base["shots_on_target_A"],
                 "adjA_shots": r["shots"] - opp_base["shots_A"],
                 # Defending: how far below the opponent's usual output T held them
-                "adjD_xg": opp_base["xg_F"] - opp["xg"],
                 "adjD_goals": opp_base["goals_for_F"] - opp["goals_for"],
                 "adjD_sot": opp_base["shots_on_target_F"] - opp["shots_on_target"],
                 "adjD_shots": opp_base["shots_F"] - opp["shots"],
@@ -146,27 +158,25 @@ def compute_form(
 
     # ── Step 3 — normalization across all team-match rows so far ───────────
     series_keys = [
-        "adjA_xg", "adjA_goals", "adjA_sot", "adjA_shots",
-        "adjD_xg", "adjD_goals", "adjD_sot", "adjD_shots",
+        "adjA_goals", "adjA_sot", "adjA_shots",
+        "adjD_goals", "adjD_sot", "adjD_shots",
         "corners", "pass_accuracy",
     ]
     z: dict[str, list[float]] = {k: _zscores([a[k] for a in adjusted]) for k in series_keys}
 
-    # ── Step 4 — per-match composites ───────────────────────────────────────
+    # ── Step 4 — per-match composites (xG weight redistributed; see module doc)
     for i, a in enumerate(adjusted):
         a["A"] = (
-            0.35 * z["adjA_xg"][i]
-            + 0.25 * z["adjA_goals"][i]
-            + 0.20 * z["adjA_sot"][i]
-            + 0.10 * z["adjA_shots"][i]
+            0.40 * z["adjA_goals"][i]
+            + 0.30 * z["adjA_sot"][i]
+            + 0.20 * z["adjA_shots"][i]
             + 0.05 * z["corners"][i]
             + 0.05 * z["pass_accuracy"][i]
         )
         a["D"] = (
-            0.40 * z["adjD_xg"][i]
-            + 0.30 * z["adjD_goals"][i]
-            + 0.20 * z["adjD_sot"][i]
-            + 0.10 * z["adjD_shots"][i]
+            0.45 * z["adjD_goals"][i]
+            + 0.35 * z["adjD_sot"][i]
+            + 0.20 * z["adjD_shots"][i]
         )
 
     # ── Steps 5–7 per team ──────────────────────────────────────────────────
@@ -272,39 +282,72 @@ def check_consistency(team_rows: list[dict]) -> None:
             log.error("consistency check failed for match %s", match_id)
 
 
-def run() -> None:
-    """Scheduled batch job: read accumulated stats, recompute Form Scores,
-    run the model, write team_form + predictions."""
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
+def _coerce_nulls(team_rows: list[dict]) -> None:
+    """API uses null for 'none recorded'; the math needs numbers. Reported, not silent."""
+    nulled = 0
+    for r in team_rows:
+        for col in STAT_COLUMNS:
+            if r[col] is None:
+                r[col] = 0.0
+                nulled += 1
+    if nulled:
+        log.warning("coerced %d null stat values to 0 across %d rows", nulled, len(team_rows))
+
+
+def run(season: int) -> None:
+    """Scheduled batch job: read accumulated stats for one season, recompute
+    Form Scores, run the model, write team_form + predictions."""
     from . import db  # imported here so pure functions stay env-free
 
     sb = db.client()
-    teams = sb.table("teams").select("id, elo").execute().data
-    team_rows = sb.table("team_match_stats").select("*").execute().data
-    matches = sb.table("matches").select("id, home_team_id, away_team_id, kickoff_at, status").execute().data
+    team_seasons = (
+        sb.table("team_seasons").select("team_id, elo").eq("season", season).execute().data
+    )
+    team_rows = (
+        sb.table("team_match_stats").select("*").eq("season", season).execute().data
+    )
+    matches = (
+        sb.table("matches")
+        .select("id, season, home_team_id, away_team_id, kickoff_at, status")
+        .eq("season", season)
+        .execute()
+        .data
+    )
 
     check_consistency(team_rows)
+    _coerce_nulls(team_rows)
 
     match_dates = {m["id"]: datetime.fromisoformat(m["kickoff_at"]) for m in matches}
-    team_elo = {t["id"]: t["elo"] for t in teams}
+    team_elo = {t["team_id"]: t["elo"] for t in team_seasons}
     as_of = datetime.now(timezone.utc).date()
 
     form_rows = compute_form(team_rows, match_dates, team_elo, as_of)
     form_by_team = {f["team_id"]: f for f in form_rows}
 
-    db_rows = [{k: v for k, v in f.items() if not k.startswith("_")} for f in form_rows]
-    sb.table("team_form").upsert(db_rows, on_conflict="team_id,as_of_date").execute()
-    log.info("wrote %d team_form rows as of %s", len(db_rows), as_of)
+    db_rows = [
+        {**{k: v for k, v in f.items() if not k.startswith("_")}, "season": season}
+        for f in form_rows
+    ]
+    sb.table("team_form").upsert(db_rows, on_conflict="team_id,season,as_of_date").execute()
+    log.info("wrote %d team_form rows for season %s as of %s", len(db_rows), season, as_of)
 
     upcoming = [
         m for m in matches
         if m["status"] == "scheduled" and m["home_team_id"] and m["away_team_id"]
     ]
-    predictions = [predict_match(m, form_by_team, team_elo) for m in upcoming]
+    predictions = [
+        {**predict_match(m, form_by_team, team_elo), "season": season} for m in upcoming
+    ]
     if predictions:
         sb.table("predictions").insert(predictions).execute()
-    log.info("wrote %d predictions (%s)", len(predictions), MODEL_VERSION)
+    log.info("wrote %d predictions for season %s (%s)", len(predictions), season, MODEL_VERSION)
 
 
 if __name__ == "__main__":
-    run()
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
+    from . import config
+
+    parser = argparse.ArgumentParser(description="Recompute Form Scores + predictions for one season")
+    parser.add_argument("--season", type=int, default=config.API_FOOTBALL_SEASON)
+    args = parser.parse_args()
+    run(args.season)

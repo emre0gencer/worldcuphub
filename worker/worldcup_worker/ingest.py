@@ -5,8 +5,10 @@ Long-running worker loop (NOT a cron job), status-driven per PROJECT_SPEC.md §3
   which matches just went live.
 - Poll only the live matches every LIVE_POLL_INTERVAL, writing a match_snapshots
   row per poll (full time-series kept for momentum charts).
-- When a match flips to finished, run the finalize step: copy the last good
-  stats into the immutable team_match_stats / player_match_stats tables.
+- When a match flips to finished, run the finalize step via the shared pipeline:
+  immutable team/player stats + events + lineups, same code as the backfill.
+
+Season comes from API_FOOTBALL_SEASON (default 2026).
 
 Run: python -m worldcup_worker.ingest
 """
@@ -16,97 +18,81 @@ import time
 from datetime import datetime, timezone
 from typing import Any
 
-from . import config, db
-from .api_football import ApiFootballClient, parse_player_stats, parse_team_stats, status_of
+from . import config, db, pipeline
+from .api_football import ApiFootballClient, status_of
 
 log = logging.getLogger("ingest")
+
+SEASON = config.API_FOOTBALL_SEASON
 
 
 def discover_live_match_ids(api: ApiFootballClient) -> tuple[set[int], dict[int, str]]:
     """One cheap fixtures-list call: live ids + status of every fixture."""
     statuses: dict[int, str] = {}
-    for fx in api.fixtures():
+    for fx in api.fixtures(SEASON):
         statuses[fx["fixture"]["id"]] = status_of(fx)
     live = {fid for fid, st in statuses.items() if st == "live"}
     return live, statuses
 
 
+def _update_match_row(sb, fx: dict[str, Any]) -> None:
+    """Refresh the volatile match columns (status_short is the source of truth;
+    the `status` column is generated in Postgres and never written)."""
+    score = fx["score"]
+    sb.table("matches").update(
+        {
+            "status_short": fx["fixture"]["status"]["short"],
+            "home_score": fx["goals"]["home"],
+            "away_score": fx["goals"]["away"],
+            "ht_home": score["halftime"]["home"],
+            "ht_away": score["halftime"]["away"],
+            "ft_home": score["fulltime"]["home"],
+            "ft_away": score["fulltime"]["away"],
+            "pen_home": score["penalty"]["home"],
+            "pen_away": score["penalty"]["away"],
+            "home_winner": fx["teams"]["home"]["winner"],
+        }
+    ).eq("id", fx["fixture"]["id"]).execute()
+
+
 def write_snapshot(api: ApiFootballClient, match_id: int) -> None:
-    """One live poll: store the raw stats blob + scores as a Track 1 snapshot."""
-    fixture = api.fixture(match_id)
-    if fixture is None:
+    """One live poll: store the raw stats blob + scores as a Track 1 snapshot.
+    A single batched call returns goals + statistics together."""
+    rows = api.fixtures_by_ids([match_id])
+    if not rows:
         log.warning("fixture %s not found on live poll", match_id)
         return
-    stats = api.fixture_statistics(match_id)
+    fx = rows[0]
     payload: dict[str, Any] = {
-        "fixture": fixture["fixture"],
-        "goals": fixture["goals"],
-        "statistics": stats,
+        "fixture": fx["fixture"],
+        "goals": fx["goals"],
+        "statistics": fx["statistics"],
     }
     sb = db.client()
     sb.table("match_snapshots").insert(
         {
             "match_id": match_id,
+            "season": SEASON,
             "captured_at": datetime.now(timezone.utc).isoformat(),
-            "elapsed_minute": fixture["fixture"]["status"].get("elapsed"),
+            "elapsed_minute": fx["fixture"]["status"].get("elapsed"),
             "payload": payload,
         }
     ).execute()
-    sb.table("matches").update(
-        {
-            "status": "live",
-            "home_score": fixture["goals"]["home"],
-            "away_score": fixture["goals"]["away"],
-        }
-    ).eq("id", match_id).execute()
-    log.info("snapshot written for match %s (minute %s)", match_id, fixture["fixture"]["status"].get("elapsed"))
+    _update_match_row(sb, fx)
+    log.info("snapshot written for match %s (minute %s)", match_id, fx["fixture"]["status"].get("elapsed"))
 
 
 def finalize_match(api: ApiFootballClient, match_id: int) -> None:
     """Finalize step: write the immutable Track 2 dataset once at full-time."""
-    sb = db.client()
-
-    existing = (
-        sb.table("team_match_stats").select("id").eq("match_id", match_id).limit(1).execute()
-    )
-    if existing.data:
-        log.info("match %s already finalized, skipping", match_id)
-        return
-
-    fixture = api.fixture(match_id)
-    if fixture is None:
+    rows = api.fixtures_by_ids([match_id])
+    if not rows:
         log.error("cannot finalize %s: fixture not found", match_id)
         return
-
-    goals = {fixture["teams"]["home"]["id"]: fixture["goals"]["home"],
-             fixture["teams"]["away"]["id"]: fixture["goals"]["away"]}
-
-    team_rows = []
-    for entry in api.fixture_statistics(match_id):
-        row = parse_team_stats(entry)
-        team_id = row["team_id"]
-        opponent_goals = next(g for tid, g in goals.items() if tid != team_id)
-        row.update(match_id=match_id, goals_for=goals[team_id], goals_against=opponent_goals)
-        team_rows.append(row)
-
-    player_rows = []
-    for team_entry in api.fixture_players(match_id):
-        for row in parse_player_stats(team_entry):
-            row["match_id"] = match_id
-            player_rows.append(row)
-
-    if team_rows:
-        sb.table("team_match_stats").insert(team_rows).execute()
-    if player_rows:
-        sb.table("player_match_stats").insert(player_rows).execute()
-    sb.table("matches").update(
-        {
-            "status": "finished",
-            "home_score": fixture["goals"]["home"],
-            "away_score": fixture["goals"]["away"],
-        }
-    ).eq("id", match_id).execute()
-    log.info("finalized match %s (%d team rows, %d player rows)", match_id, len(team_rows), len(player_rows))
+    fx = rows[0]
+    sb = db.client()
+    pipeline.ingest_fixture_details(sb, fx, SEASON)
+    _update_match_row(sb, fx)
+    log.info("finalized match %s", match_id)
 
 
 def run() -> None:
@@ -115,7 +101,7 @@ def run() -> None:
     tracked_live: set[int] = set()
     last_discovery = 0.0
 
-    log.info("ingestion worker started")
+    log.info("ingestion worker started (season %s)", SEASON)
     while True:
         now = time.monotonic()
         if now - last_discovery >= config.FIXTURE_DISCOVERY_INTERVAL or tracked_live:
