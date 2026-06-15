@@ -109,7 +109,7 @@ def seconds_until_next_kickoff(season: int) -> float | None:
         .eq("season", season)
         .eq("status", "scheduled")
         .gt("kickoff_at", now_iso)
-        .order("kickoff_at", ascending=True)
+        .order("kickoff_at", desc=False)
         .limit(1)
         .execute()
     )

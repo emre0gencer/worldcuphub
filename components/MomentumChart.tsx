@@ -22,16 +22,34 @@ export default function MomentumChart({
   data,
   homeName,
   awayName,
+  homeColor = "#171717",
+  awayColor = "#9ca3af",
+  curveType = "stepAfter",
 }: {
   title: string;
   data: MomentumPoint[];
   homeName: string;
   awayName: string;
+  homeColor?: string;
+  awayColor?: string;
+  curveType?: "stepAfter" | "monotone" | "linear";
 }) {
   return (
     <div>
-      <h3 className="mb-2 text-xs uppercase tracking-wide text-neutral-500">{title}</h3>
-      <ResponsiveContainer width="100%" height={220}>
+      <div className="mb-2 flex items-center gap-3">
+        <h3 className="text-xs uppercase tracking-wide text-neutral-500">{title}</h3>
+        <div className="flex items-center gap-3 text-xs text-neutral-500">
+          <span className="flex items-center gap-1">
+            <span className="inline-block h-0.5 w-4 rounded-full" style={{ backgroundColor: homeColor }} />
+            {homeName}
+          </span>
+          <span className="flex items-center gap-1">
+            <span className="inline-block h-0.5 w-4 rounded-full" style={{ backgroundColor: awayColor }} />
+            {awayName}
+          </span>
+        </div>
+      </div>
+      <ResponsiveContainer width="100%" height={200}>
         <LineChart data={data} margin={{ top: 4, right: 8, bottom: 0, left: -24 }}>
           <CartesianGrid strokeDasharray="3 3" strokeOpacity={0.3} />
           <XAxis dataKey="minute" tick={{ fontSize: 11 }} unit="'" />
@@ -40,8 +58,8 @@ export default function MomentumChart({
             labelFormatter={(m) => `Minute ${m}`}
             contentStyle={{ fontSize: 12, borderRadius: 8 }}
           />
-          <Line type="stepAfter" dataKey="home" name={homeName} stroke="#171717" strokeWidth={2} dot={false} />
-          <Line type="stepAfter" dataKey="away" name={awayName} stroke="#9ca3af" strokeWidth={2} dot={false} />
+          <Line type={curveType} dataKey="home" name={homeName} stroke={homeColor} strokeWidth={2.5} dot={false} />
+          <Line type={curveType} dataKey="away" name={awayName} stroke={awayColor} strokeWidth={2.5} dot={false} />
         </LineChart>
       </ResponsiveContainer>
     </div>

@@ -1,5 +1,53 @@
 import Link from "next/link";
 import type { MatchWithTeams, Team } from "@/lib/types";
+import { getTeamColors } from "@/lib/team-colors";
+
+export type EloEntry = { elo: number; initial_elo: number | null };
+
+// ── color helpers ─────────────────────────────────────────────────────────────
+
+function shiftColor(hex: string, amount: number): string {
+  const r = Math.min(255, Math.max(0, parseInt(hex.slice(1, 3), 16) + amount));
+  const g = Math.min(255, Math.max(0, parseInt(hex.slice(3, 5), 16) + amount));
+  const b = Math.min(255, Math.max(0, parseInt(hex.slice(5, 7), 16) + amount));
+  return `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${b.toString(16).padStart(2, "0")}`;
+}
+
+/** Scale bright colors darker (preserving hue) so white text stays readable. */
+function ensureWhiteContrast(hex: string): string {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  const lum = r * 0.299 + g * 0.587 + b * 0.114;
+  if (lum <= 145) return hex;
+  const f = 145 / lum;
+  const nr = Math.round(r * f);
+  const ng = Math.round(g * f);
+  const nb = Math.round(b * f);
+  return `#${nr.toString(16).padStart(2, "0")}${ng.toString(16).padStart(2, "0")}${nb.toString(16).padStart(2, "0")}`;
+}
+
+// ── sub-components ────────────────────────────────────────────────────────────
+
+function CompactElo({ elo, initial }: { elo: number; initial: number }) {
+  const delta = Math.round(elo - initial);
+  const rounded = Math.round(elo);
+  const up = delta > 0;
+  return (
+    <span className="flex items-center gap-0.5 tabular-nums text-[10px] font-bold leading-none text-white">
+      <span>{rounded}</span>
+      {delta !== 0 && (
+        <span
+          className="rounded-sm px-0.5"
+          style={{ backgroundColor: up ? "#16a34a" : "#dc2626" }}
+          title={`${up ? "+" : ""}${delta} since tournament start`}
+        >
+          {up ? "▲" : "▼"}{Math.abs(delta)}
+        </span>
+      )}
+    </span>
+  );
+}
 
 const STAGE_LABEL: Record<string, string> = {
   group: "Group",
@@ -11,7 +59,6 @@ const STAGE_LABEL: Record<string, string> = {
   final: "Final",
 };
 
-// Map an API "short" status to a compact live-phase label for the badge.
 const LIVE_PHASE: Record<string, string> = {
   "1H": "1H",
   "2H": "2H",
@@ -28,44 +75,78 @@ function TeamRow({
   team,
   score,
   pens,
+  eloEntry,
+  color,
 }: {
   team: Team | null;
   score: number | null;
   pens: number | null;
+  eloEntry?: EloEntry | null;
+  color: string;
 }) {
+  const c = ensureWhiteContrast(color);
+  const gradient = `linear-gradient(135deg, ${shiftColor(c, 18)} 0%, ${c} 45%, ${shiftColor(c, -28)} 100%)`;
+
   return (
-    <div className="flex items-center justify-between gap-3">
+    <div
+      className="flex items-center justify-between gap-3 px-3 py-2.5 text-white"
+      style={{ background: gradient }}
+    >
       <div className="flex items-center gap-2 min-w-0">
         {team?.logo_url ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={team.logo_url} alt="" className="h-4 w-6 rounded-[2px] object-cover" />
+          <img
+            src={team.logo_url}
+            alt=""
+            className="h-5 w-5 rounded-full object-cover ring-1 ring-white/25"
+          />
         ) : (
-          <span className="h-4 w-6 rounded-[2px] bg-neutral-200 dark:bg-neutral-800" />
+          <span
+            className="h-5 w-5 rounded-full"
+            style={{ backgroundColor: shiftColor(color, 30) }}
+          />
         )}
-        <span className="truncate text-sm font-medium">{team?.name ?? "TBD"}</span>
+        <div className="min-w-0">
+          <span className="block truncate text-sm font-bold">
+            {team?.name ?? "TBD"}
+          </span>
+          {eloEntry?.initial_elo != null && (
+            <CompactElo elo={eloEntry.elo} initial={eloEntry.initial_elo} />
+          )}
+        </div>
       </div>
-      <span className="text-sm tabular-nums font-semibold">
-        {score ?? ""}
-        {pens != null && <span className="text-neutral-400 font-normal"> ({pens})</span>}
-      </span>
+      <div className="flex items-baseline gap-1 shrink-0">
+        <span className="text-lg tabular-nums font-bold">
+          {score ?? ""}
+        </span>
+        {pens != null && (
+          <span className="text-xs tabular-nums font-bold">
+            ({pens})
+          </span>
+        )}
+      </div>
     </div>
   );
 }
+
+// ── card ───────────────────────────────────────────────────────────────────────
+
+const FALLBACK_HOME = "#404040";
+const FALLBACK_AWAY = "#6b6b6b";
 
 export default function MatchCard({
   match,
   live,
   minute,
+  eloByTeam,
 }: {
   match: MatchWithTeams;
   live?: boolean;
   minute?: number | null;
+  eloByTeam?: Record<number, EloEntry>;
 }) {
   const kickoff = new Date(match.kickoff_at);
-  // `live` is supplied by the timeline (time-aware); fall back to the DB status.
   const isLive = live ?? match.status === "live";
-  // FIFA-style running clock: prefer the live minute; HT shows "HT"; fall back
-  // to the phase label (1H/2H/…) only when no minute is available yet.
   const phase = isLive
     ? match.status_short === "HT"
       ? "HT"
@@ -74,17 +155,25 @@ export default function MatchCard({
         : LIVE_PHASE[match.status_short] ?? "LIVE"
     : null;
 
+  const homeColor = match.home_team
+    ? getTeamColors(match.home_team.country_code).main
+    : FALLBACK_HOME;
+  const awayColor = match.away_team
+    ? getTeamColors(match.away_team.country_code).secondary
+    : FALLBACK_AWAY;
+
   return (
     <Link
       href={`/matches/${match.id}`}
       className={
-        "block w-56 shrink-0 rounded-xl border p-4 transition-colors " +
+        "block w-56 shrink-0 overflow-hidden rounded-xl border transition-shadow hover:shadow-lg " +
         (isLive
-          ? "border-red-500/60 bg-red-50/70 ring-1 ring-red-500/30 hover:border-red-500 dark:bg-red-950/20"
-          : "border-neutral-200 hover:border-neutral-400 dark:border-neutral-800 dark:hover:border-neutral-600")
+          ? "border-red-500/60 ring-1 ring-red-500/30"
+          : "border-neutral-200 dark:border-neutral-800")
       }
     >
-      <div className="mb-3 flex items-center justify-between text-xs">
+      {/* Header */}
+      <div className="flex items-center justify-between bg-white px-3.5 pt-2.5 pb-2 text-xs dark:bg-neutral-950">
         <span className="text-neutral-500">
           {match.stage === "group" && match.group_letter
             ? `Group ${match.group_letter}`
@@ -105,10 +194,21 @@ export default function MatchCard({
           </span>
         )}
       </div>
-      <div className="space-y-2">
-        <TeamRow team={match.home_team} score={match.home_score} pens={match.pen_home} />
-        <TeamRow team={match.away_team} score={match.away_score} pens={match.pen_away} />
-      </div>
+      {/* Team rows — opaque team-color gradient fills */}
+      <TeamRow
+        team={match.home_team}
+        score={match.home_score}
+        pens={match.pen_home}
+        eloEntry={match.home_team_id != null ? eloByTeam?.[match.home_team_id] : null}
+        color={homeColor}
+      />
+      <TeamRow
+        team={match.away_team}
+        score={match.away_score}
+        pens={match.pen_away}
+        eloEntry={match.away_team_id != null ? eloByTeam?.[match.away_team_id] : null}
+        color={awayColor}
+      />
     </Link>
   );
 }

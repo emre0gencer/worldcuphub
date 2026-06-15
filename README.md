@@ -82,6 +82,20 @@ D(m) = 0.45·z(adjD_goals) + 0.35·z(adjD_sot) + 0.20·z(adjD_shots)
 
 **Step 7 — Display normalization (0–100).** `OverallForm = 0.5·AttackForm + 0.5·DefendForm`. Because the per-match composites are already z-scores, shrinkage + the attack/defend average compress the *team-level* spread into a narrow band early on (everyone ≈47–54 after one matchday). So each team's final attack / defend / overall value is **re-z-scored across the field** (using the teams that have actually played as the reference distribution) before the display map `clamp(50 + 15·z, 0, 100)`. Result: tournament average = 50, +1 std ≈ 65, +2 std ≈ 80, with a legible spread instead of a flat band. (The `baseline-v2-noxg` path keeps the original direct map `clamp(50 + 15·overall, 0, 100)` so the 2022 demo is unchanged.)
 
+#### Elo — seeded from FIFA, updated live (2026-only)
+
+Each 2026 team's Elo is seeded from the **official FIFA Elo ranking points** (snapshot 2026-06-11, stored in `worker/worldcup_worker/fifa_points_2026.py`). After each analytics run, `elo.py` replays from that frozen `initial_elo` baseline over all finished matches in chronological order using the FIFA 2018 formula:
+
+```
+W_e = 1 / (10^(-(P_home − P_away) / 600) + 1)   # scale 600, matches the FIFA seed source
+P_after = P_before + I × (W − W_e)
+I = 50 (group/R32/R16)  |  60 (QF/SF/third_place/final)
+W = 1.0 win / 0.5 draw / 0.0 loss; shootout: 0.75 win / 0.5 loss
+Knockout floor: a team cannot lose Elo in the knockout rounds (delta clamped to 0 if negative).
+```
+
+Replay is always from `initial_elo` (idempotent — reruns never double-count). The result is written to `team_seasons.elo`. The frontend shows the drift with a ▲ green / ▼ red triangle in the match pre-match H2H and rankings pages. 2022 is unaffected (`initial_elo` is NULL → replay is a no-op).
+
 A **baseline upset probability model** sits on top:
 
 ```

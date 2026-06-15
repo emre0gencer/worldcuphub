@@ -425,7 +425,11 @@ def _coerce_nulls(team_rows: list[dict], stat_columns: tuple[str, ...]) -> None:
 def run(season: int) -> None:
     """Scheduled batch job: read accumulated stats for one season, recompute
     Form Scores, run the model, write team_form + predictions."""
-    from . import db  # imported here so pure functions stay env-free
+    from . import db, elo as elo_module  # imported here so pure functions stay env-free
+
+    # Update Elo from initial seed + all finished matches before computing form.
+    # No-op for 2022 (initial_elo is NULL → elo_module.run returns immediately).
+    elo_module.run(season)
 
     sb = db.client()
     team_seasons = (

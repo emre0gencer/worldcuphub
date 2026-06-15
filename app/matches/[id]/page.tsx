@@ -1,5 +1,7 @@
 import { notFound } from "next/navigation";
 import AutoRefresh from "@/components/AutoRefresh";
+import EloDelta from "@/components/EloDelta";
+import { getTeamColors } from "@/lib/team-colors";
 import MomentumChart, { type MomentumPoint } from "@/components/MomentumChart";
 import StatBar from "@/components/StatBar";
 import ApiSportsWidget from "@/components/widgets/ApiSportsWidget";
@@ -24,6 +26,7 @@ import type {
   MatchLineupPlayer,
   MatchWithTeams,
   Team,
+  TeamSeason,
 } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -48,9 +51,13 @@ function Logo({ team, size = "h-9 w-9" }: { team: Team | null; size?: string }) 
 function MatchHeader({
   match,
   liveMinute,
+  homeSeason,
+  awaySeason,
 }: {
   match: MatchWithTeams;
   liveMinute?: number | null;
+  homeSeason?: TeamSeason;
+  awaySeason?: TeamSeason;
 }) {
   const kickoff = new Date(match.kickoff_at);
   const stageLabel =
@@ -79,6 +86,11 @@ function MatchHeader({
         <div className="flex w-40 flex-col items-center gap-2">
           <Logo team={match.home_team} />
           <span className="font-semibold">{match.home_team?.name ?? "TBD"}</span>
+          {homeSeason?.initial_elo != null && (
+            <span className="text-xs text-neutral-500">
+              <EloDelta current={homeSeason.elo} initial={homeSeason.initial_elo} />
+            </span>
+          )}
         </div>
         <div className="w-32">
           {match.status === "scheduled" ? (
@@ -129,6 +141,11 @@ function MatchHeader({
         <div className="flex w-40 flex-col items-center gap-2">
           <Logo team={match.away_team} />
           <span className="font-semibold">{match.away_team?.name ?? "TBD"}</span>
+          {awaySeason?.initial_elo != null && (
+            <span className="text-xs text-neutral-500">
+              <EloDelta current={awaySeason.elo} initial={awaySeason.initial_elo} />
+            </span>
+          )}
         </div>
       </div>
     </div>
@@ -137,22 +154,30 @@ function MatchHeader({
 
 // ── scheduled ────────────────────────────────────────────────────────────────
 
-async function ScheduledView({ match }: { match: MatchWithTeams }) {
+async function ScheduledView({
+  match,
+  homeSeason,
+  awaySeason,
+}: {
+  match: MatchWithTeams;
+  homeSeason?: TeamSeason;
+  awaySeason?: TeamSeason;
+}) {
   const home = match.home_team;
   const away = match.away_team;
   if (!home || !away) {
     return <p className="text-sm text-neutral-500">Teams will be decided by the previous round.</p>;
   }
-  const [forms, prediction, priorMeetings, teamSeasons] = await Promise.all([
+  const homeColor = getTeamColors(home.country_code).main;
+  const awayColor = getTeamColors(away.country_code).secondary;
+
+  const [forms, prediction, priorMeetings] = await Promise.all([
     getFormForTeams(match.season, [home.id, away.id]),
     getLatestPrediction(match.id),
     getPriorMeetings(home.id, away.id),
-    getTeamSeasons(match.season),
   ]);
   const homeForm = forms.get(home.id);
   const awayForm = forms.get(away.id);
-  const homeSeason = teamSeasons.find((t) => t.team_id === home.id);
-  const awaySeason = teamSeasons.find((t) => t.team_id === away.id);
 
   return (
     <div className="space-y-8">
@@ -165,17 +190,44 @@ async function ScheduledView({ match }: { match: MatchWithTeams }) {
             label="FIFA ranking"
             home={homeSeason?.fifa_ranking ?? null}
             away={awaySeason?.fifa_ranking ?? null}
+            homeColor={homeColor}
+            awayColor={awayColor}
           />
-          <StatBar
-            label="Elo"
-            home={homeSeason ? Math.round(homeSeason.elo) : null}
-            away={awaySeason ? Math.round(awaySeason.elo) : null}
-          />
+          {/* Elo row: custom layout so EloDelta (JSX) can replace the raw number. */}
+          <div className="py-2">
+            <div className="mb-1 flex items-center justify-between text-sm">
+              <span className="font-semibold">
+                {homeSeason
+                  ? <EloDelta current={homeSeason.elo} initial={homeSeason.initial_elo} />
+                  : "–"}
+              </span>
+              <span className="text-xs uppercase tracking-wide text-neutral-500">Elo</span>
+              <span className="font-semibold">
+                {awaySeason
+                  ? <EloDelta current={awaySeason.elo} initial={awaySeason.initial_elo} />
+                  : "–"}
+              </span>
+            </div>
+            <div className="flex h-1.5 gap-0.5 overflow-hidden rounded-full">
+              {(() => {
+                const h = homeSeason?.elo ?? 0;
+                const a = awaySeason?.elo ?? 0;
+                const total = h + a;
+                const pct = total > 0 ? (h / total) * 100 : 50;
+                return (
+                  <>
+                    <div style={{ width: `${pct}%`, backgroundColor: homeColor }} />
+                    <div style={{ width: `${100 - pct}%`, backgroundColor: awayColor }} />
+                  </>
+                );
+              })()}
+            </div>
+          </div>
           {homeForm && awayForm && (
             <>
-              <StatBar label="Overall form" home={homeForm.overall_form} away={awayForm.overall_form} format={(v) => v.toFixed(1)} />
-              <StatBar label="Attacking form" home={homeForm.attacking_form} away={awayForm.attacking_form} format={(v) => v.toFixed(1)} />
-              <StatBar label="Defending form" home={homeForm.defending_form} away={awayForm.defending_form} format={(v) => v.toFixed(1)} />
+              <StatBar label="Overall form" home={homeForm.overall_form} away={awayForm.overall_form} format={(v) => v.toFixed(1)} homeColor={homeColor} awayColor={awayColor} />
+              <StatBar label="Attacking form" home={homeForm.attacking_form} away={awayForm.attacking_form} format={(v) => v.toFixed(1)} homeColor={homeColor} awayColor={awayColor} />
+              <StatBar label="Defending form" home={homeForm.defending_form} away={awayForm.defending_form} format={(v) => v.toFixed(1)} homeColor={homeColor} awayColor={awayColor} />
             </>
           )}
         </div>
@@ -268,19 +320,41 @@ function LiveStatRow({
   away,
   label,
   format,
+  homeColor,
+  awayColor,
 }: {
   home: number | null;
   away: number | null;
   label: string;
   format?: (v: number) => string;
+  homeColor?: string;
+  awayColor?: string;
 }) {
   if (home == null && away == null) return null;
-  return <StatBar label={label} home={home} away={away} format={format} />;
+  return <StatBar label={label} home={home} away={away} format={format} homeColor={homeColor} awayColor={awayColor} />;
 }
+
+const MOMENTUM_CHARTS: {
+  title: string;
+  type: string;
+  curveType?: "stepAfter" | "monotone";
+}[] = [
+  { title: "Shots",           type: "Total Shots" },
+  { title: "Shots on target", type: "Shots on Goal" },
+  { title: "xG",              type: "expected_goals", curveType: "monotone" },
+  { title: "Corners",         type: "Corner Kicks" },
+  { title: "Fouls",           type: "Fouls" },
+  { title: "Passes",          type: "Total passes" },
+];
 
 async function LiveView({ match }: { match: MatchWithTeams }) {
   const home = match.home_team!;
   const away = match.away_team!;
+  const homeColors = getTeamColors(home.country_code);
+  const awayColors = getTeamColors(away.country_code);
+  const homeColor = homeColors.main;
+  const awayColor = awayColors.secondary;
+
   const snapshots = await getSnapshotSeries(match.id);
   const latest = snapshots.at(-1);
 
@@ -317,17 +391,38 @@ async function LiveView({ match }: { match: MatchWithTeams }) {
                 home={stat(r.type, home.id)}
                 away={stat(r.type, away.id)}
                 format={r.format}
+                homeColor={homeColor}
+                awayColor={awayColor}
               />
             ))}
           </div>
         </section>
       )}
 
-      {/* Momentum charts always come from the Track 1 snapshot pipeline */}
+      {/* Momentum charts — horizontal scroll carousel, one snap per chart */}
       {snapshots.length > 0 && (
-        <section className="grid gap-8 sm:grid-cols-2">
-          <MomentumChart title="Shots momentum" data={momentum("Total Shots")} homeName={home.name} awayName={away.name} />
-          <MomentumChart title="Shots on target momentum" data={momentum("Shots on Goal")} homeName={home.name} awayName={away.name} />
+        <section>
+          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-neutral-500">
+            Momentum
+          </h2>
+          <div className="flex snap-x snap-mandatory gap-4 overflow-x-auto pb-3">
+            {MOMENTUM_CHARTS.map((c) => (
+              <div
+                key={c.type}
+                className="w-[calc(100%-2rem)] shrink-0 snap-start rounded-xl border border-neutral-200 p-4 sm:w-80 dark:border-neutral-800"
+              >
+                <MomentumChart
+                  title={c.title}
+                  data={momentum(c.type)}
+                  homeName={home.name}
+                  awayName={away.name}
+                  homeColor={homeColor}
+                  awayColor={awayColor}
+                  curveType={c.curveType ?? "stepAfter"}
+                />
+              </div>
+            ))}
+          </div>
         </section>
       )}
     </div>
@@ -457,6 +552,8 @@ function LineupColumn({
 async function FinishedView({ match }: { match: MatchWithTeams }) {
   const home = match.home_team!;
   const away = match.away_team!;
+  const homeColor = getTeamColors(home.country_code).main;
+  const awayColor = getTeamColors(away.country_code).secondary;
 
   const [teamStats, playerStats, events, lineups] = await Promise.all([
     getTeamMatchStats(match.id),
@@ -486,26 +583,26 @@ async function FinishedView({ match }: { match: MatchWithTeams }) {
             Match stats
           </h2>
           <div className="rounded-xl border border-neutral-200 px-4 dark:border-neutral-800">
-            <StatBar label="Possession" home={hs.possession} away={as.possession} format={(v) => `${v.toFixed(0)}%`} />
+            <StatBar label="Possession" home={hs.possession} away={as.possession} format={(v) => `${v.toFixed(0)}%`} homeColor={homeColor} awayColor={awayColor} />
             {(hs.xg != null || as.xg != null) && (
-              <StatBar label="xG" home={hs.xg} away={as.xg} format={(v) => v.toFixed(2)} />
+              <StatBar label="xG" home={hs.xg} away={as.xg} format={(v) => v.toFixed(2)} homeColor={homeColor} awayColor={awayColor} />
             )}
-            <StatBar label="Shots" home={hs.shots} away={as.shots} />
-            <StatBar label="On target" home={hs.shots_on_target} away={as.shots_on_target} />
-            <StatBar label="Off target" home={hs.shots_off_target} away={as.shots_off_target} />
-            <StatBar label="Blocked shots" home={hs.shots_blocked} away={as.shots_blocked} />
-            <StatBar label="Shots inside box" home={hs.shots_inside_box} away={as.shots_inside_box} />
-            <StatBar label="Corners" home={hs.corners} away={as.corners} />
-            <StatBar label="Offsides" home={hs.offsides} away={as.offsides} />
-            <StatBar label="Fouls" home={hs.fouls} away={as.fouls} />
-            <StatBar label="Yellow cards" home={hs.yellow_cards} away={as.yellow_cards} />
-            <StatBar label="Red cards" home={hs.red_cards} away={as.red_cards} />
-            <StatBar label="Saves" home={hs.saves} away={as.saves} />
+            <StatBar label="Shots" home={hs.shots} away={as.shots} homeColor={homeColor} awayColor={awayColor} />
+            <StatBar label="On target" home={hs.shots_on_target} away={as.shots_on_target} homeColor={homeColor} awayColor={awayColor} />
+            <StatBar label="Off target" home={hs.shots_off_target} away={as.shots_off_target} homeColor={homeColor} awayColor={awayColor} />
+            <StatBar label="Blocked shots" home={hs.shots_blocked} away={as.shots_blocked} homeColor={homeColor} awayColor={awayColor} />
+            <StatBar label="Shots inside box" home={hs.shots_inside_box} away={as.shots_inside_box} homeColor={homeColor} awayColor={awayColor} />
+            <StatBar label="Corners" home={hs.corners} away={as.corners} homeColor={homeColor} awayColor={awayColor} />
+            <StatBar label="Offsides" home={hs.offsides} away={as.offsides} homeColor={homeColor} awayColor={awayColor} />
+            <StatBar label="Fouls" home={hs.fouls} away={as.fouls} homeColor={homeColor} awayColor={awayColor} />
+            <StatBar label="Yellow cards" home={hs.yellow_cards} away={as.yellow_cards} homeColor={homeColor} awayColor={awayColor} />
+            <StatBar label="Red cards" home={hs.red_cards} away={as.red_cards} homeColor={homeColor} awayColor={awayColor} />
+            <StatBar label="Saves" home={hs.saves} away={as.saves} homeColor={homeColor} awayColor={awayColor} />
             {(hs.goals_prevented != null || as.goals_prevented != null) && (
-              <StatBar label="Goals prevented" home={hs.goals_prevented} away={as.goals_prevented} format={(v) => v.toFixed(2)} />
+              <StatBar label="Goals prevented" home={hs.goals_prevented} away={as.goals_prevented} format={(v) => v.toFixed(2)} homeColor={homeColor} awayColor={awayColor} />
             )}
-            <StatBar label="Passes" home={hs.passes} away={as.passes} />
-            <StatBar label="Pass accuracy" home={hs.pass_accuracy} away={as.pass_accuracy} format={(v) => `${v.toFixed(0)}%`} />
+            <StatBar label="Passes" home={hs.passes} away={as.passes} homeColor={homeColor} awayColor={awayColor} />
+            <StatBar label="Pass accuracy" home={hs.pass_accuracy} away={as.pass_accuracy} format={(v) => `${v.toFixed(0)}%`} homeColor={homeColor} awayColor={awayColor} />
           </div>
         </section>
       )}
@@ -583,13 +680,18 @@ export default async function MatchPage({ params }: PageProps<"/matches/[id]">) 
   const match = await getMatch(matchId);
   if (!match) notFound();
 
-  const liveMinute =
-    match.status === "live" ? await getLatestSnapshotMinute(matchId) : null;
+  const [liveMinute, teamSeasons] = await Promise.all([
+    match.status === "live" ? getLatestSnapshotMinute(matchId) : Promise.resolve(null),
+    getTeamSeasons(match.season),
+  ]);
+
+  const homeSeason = teamSeasons.find((t) => t.team_id === match.home_team_id) ?? undefined;
+  const awaySeason = teamSeasons.find((t) => t.team_id === match.away_team_id) ?? undefined;
 
   return (
     <div className="space-y-8">
-      <MatchHeader match={match} liveMinute={liveMinute} />
-      {match.status === "scheduled" && <ScheduledView match={match} />}
+      <MatchHeader match={match} liveMinute={liveMinute} homeSeason={homeSeason} awaySeason={awaySeason} />
+      {match.status === "scheduled" && <ScheduledView match={match} homeSeason={homeSeason} awaySeason={awaySeason} />}
       {match.status === "live" && <LiveView match={match} />}
       {match.status === "finished" && <FinishedView match={match} />}
     </div>

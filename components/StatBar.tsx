@@ -4,11 +4,15 @@ export default function StatBar({
   home,
   away,
   format = (v: number) => `${v}`,
+  homeColor,
+  awayColor,
 }: {
   label: string;
   home: number | null;
   away: number | null;
   format?: (v: number) => string;
+  homeColor?: string;
+  awayColor?: string;
 }) {
   const h = home ?? 0;
   const a = away ?? 0;
@@ -22,8 +26,14 @@ export default function StatBar({
         <span className="tabular-nums font-semibold">{away == null ? "–" : format(a)}</span>
       </div>
       <div className="flex h-1.5 gap-0.5 overflow-hidden rounded-full">
-        <div className="bg-neutral-900 dark:bg-neutral-100" style={{ width: `${homeShare}%` }} />
-        <div className="bg-neutral-300 dark:bg-neutral-700" style={{ width: `${100 - homeShare}%` }} />
+        <div
+          className={homeColor ? undefined : "bg-neutral-900 dark:bg-neutral-100"}
+          style={{ width: `${homeShare}%`, ...(homeColor ? { backgroundColor: homeColor } : {}) }}
+        />
+        <div
+          className={awayColor ? undefined : "bg-neutral-300 dark:bg-neutral-700"}
+          style={{ width: `${100 - homeShare}%`, ...(awayColor ? { backgroundColor: awayColor } : {}) }}
+        />
       </div>
     </div>
   );

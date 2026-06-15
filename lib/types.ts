@@ -15,6 +15,8 @@ export interface TeamSeason {
   season: number;
   fifa_ranking: number | null;
   elo: number;
+  initial_elo: number | null;
+  fifa_points: number | null;
   team?: Team;
 }
 

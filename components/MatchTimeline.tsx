@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import MatchCard from "@/components/MatchCard";
+import MatchCard, { type EloEntry } from "@/components/MatchCard";
 import type { MatchWithTeams } from "@/lib/types";
 
 // How long after kickoff a match is treated as live when the DB status hasn't
@@ -47,9 +47,11 @@ function dayLabel(key: string, todayKey: string): { label: string; date: string 
 export default function MatchTimeline({
   matches,
   liveMinutes = {},
+  eloByTeam,
 }: {
   matches: MatchWithTeams[];
   liveMinutes?: Record<number, number | null>;
+  eloByTeam?: Record<number, EloEntry>;
 }) {
   // Re-evaluate live windows every minute without a server round-trip.
   const [now, setNow] = useState(() => Date.now());
@@ -114,6 +116,7 @@ export default function MatchTimeline({
         matches={d.matches}
         now={now}
         liveMinutes={liveMinutes}
+        eloByTeam={eloByTeam}
         isToday={isToday}
         anchorRef={isToday ? anchorRef : undefined}
       />,
@@ -133,6 +136,7 @@ function DaySection({
   matches,
   now,
   liveMinutes,
+  eloByTeam,
   isToday,
   anchorRef,
 }: {
@@ -141,6 +145,7 @@ function DaySection({
   matches: MatchWithTeams[];
   now: number;
   liveMinutes: Record<number, number | null>;
+  eloByTeam?: Record<number, EloEntry>;
   isToday: boolean;
   anchorRef?: React.RefObject<HTMLElement | null>;
 }) {
@@ -170,7 +175,7 @@ function DaySection({
       </div>
       <div className="flex flex-wrap gap-3">
         {matches.map((m) => (
-          <MatchCard key={m.id} match={m} live={isLiveNow(m, now)} minute={liveMinutes[m.id]} />
+          <MatchCard key={m.id} match={m} live={isLiveNow(m, now)} minute={liveMinutes[m.id]} eloByTeam={eloByTeam} />
         ))}
       </div>
     </section>

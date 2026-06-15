@@ -1,4 +1,5 @@
 import Link from "next/link";
+import EloDelta from "@/components/EloDelta";
 import FormBadge from "@/components/FormBadge";
 import FormTrendChart, { type FormTrendSeries } from "@/components/FormTrendChart";
 import {
@@ -6,9 +7,10 @@ import {
   getFormHistory,
   getLatestForm,
   getLatestPredictions,
+  getTeamSeasons,
 } from "@/lib/queries";
 import { resolveSeason } from "@/lib/season";
-import type { Team, TeamForm } from "@/lib/types";
+import type { Team, TeamForm, TeamSeason } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
@@ -16,11 +18,13 @@ function RankingTable({
   title,
   rows,
   teams,
+  teamSeasons,
   value,
 }: {
   title: string;
   rows: TeamForm[];
   teams: Map<number, Team>;
+  teamSeasons: Map<number, TeamSeason>;
   value: (f: TeamForm) => number;
 }) {
   const sorted = [...rows].sort((a, b) => value(b) - value(a)).slice(0, 12);
@@ -30,6 +34,7 @@ function RankingTable({
       <ol className="rounded-xl border border-neutral-200 dark:border-neutral-800">
         {sorted.map((f, i) => {
           const team = teams.get(f.team_id);
+          const ts = teamSeasons.get(f.team_id);
           return (
             <li
               key={f.team_id}
@@ -43,7 +48,12 @@ function RankingTable({
                 )}
                 <span className="truncate text-sm">{team?.name ?? f.team_id}</span>
               </div>
-              <FormBadge value={value(f)} sampleSize={f.sample_size} />
+              <div className="flex items-center gap-3">
+                <span className="text-xs text-neutral-400">
+                  <EloDelta current={ts?.elo ?? null} initial={ts?.initial_elo ?? null} />
+                </span>
+                <FormBadge value={value(f)} sampleSize={f.sample_size} />
+              </div>
             </li>
           );
         })}
@@ -55,11 +65,13 @@ function RankingTable({
 export default async function RankingsPage({ searchParams }: PageProps<"/rankings">) {
   const sp = await searchParams;
   const season = resolveSeason(sp.season);
-  const [latestForm, matches, predictions] = await Promise.all([
+  const [latestForm, matches, predictions, allTeamSeasons] = await Promise.all([
     getLatestForm(season),
     getAllMatches(season),
     getLatestPredictions(season),
+    getTeamSeasons(season),
   ]);
+  const teamSeasons = new Map<number, TeamSeason>(allTeamSeasons.map((ts) => [ts.team_id, ts]));
 
   const teams = new Map<number, Team>();
   for (const m of matches) {
@@ -99,9 +111,9 @@ export default async function RankingsPage({ searchParams }: PageProps<"/ranking
       )}
 
       <div className="grid gap-8 md:grid-cols-3">
-        <RankingTable title="Overall form" rows={latestForm} teams={teams} value={(f) => f.overall_form} />
-        <RankingTable title="Attacking form" rows={latestForm} teams={teams} value={(f) => f.attacking_form} />
-        <RankingTable title="Defending form" rows={latestForm} teams={teams} value={(f) => f.defending_form} />
+        <RankingTable title="Overall form" rows={latestForm} teams={teams} teamSeasons={teamSeasons} value={(f) => f.overall_form} />
+        <RankingTable title="Attacking form" rows={latestForm} teams={teams} teamSeasons={teamSeasons} value={(f) => f.attacking_form} />
+        <RankingTable title="Defending form" rows={latestForm} teams={teams} teamSeasons={teamSeasons} value={(f) => f.defending_form} />
       </div>
 
       <section>

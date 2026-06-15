@@ -1,5 +1,5 @@
 import MatchTimeline from "@/components/MatchTimeline";
-import { getAllMatches, getLatestSnapshotMinute } from "@/lib/queries";
+import { getAllMatches, getLatestSnapshotMinute, getTeamSeasons } from "@/lib/queries";
 import { resolveSeason } from "@/lib/season";
 
 // Live scores must always be fresh — render per request.
@@ -8,7 +8,10 @@ export const dynamic = "force-dynamic";
 export default async function HomePage({ searchParams }: PageProps<"/">) {
   const sp = await searchParams;
   const season = resolveSeason(sp.season);
-  const matches = await getAllMatches(season);
+  const [matches, teamSeasons] = await Promise.all([
+    getAllMatches(season),
+    getTeamSeasons(season),
+  ]);
 
   if (matches.length === 0) {
     return (
@@ -27,5 +30,10 @@ export default async function HomePage({ searchParams }: PageProps<"/">) {
     }),
   );
 
-  return <MatchTimeline matches={matches} liveMinutes={liveMinutes} />;
+  const eloByTeam: Record<number, { elo: number; initial_elo: number | null }> = {};
+  for (const ts of teamSeasons) {
+    eloByTeam[ts.team_id] = { elo: ts.elo, initial_elo: ts.initial_elo };
+  }
+
+  return <MatchTimeline matches={matches} liveMinutes={liveMinutes} eloByTeam={eloByTeam} />;
 }
