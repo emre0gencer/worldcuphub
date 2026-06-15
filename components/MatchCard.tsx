@@ -55,14 +55,24 @@ function TeamRow({
 export default function MatchCard({
   match,
   live,
+  minute,
 }: {
   match: MatchWithTeams;
   live?: boolean;
+  minute?: number | null;
 }) {
   const kickoff = new Date(match.kickoff_at);
   // `live` is supplied by the timeline (time-aware); fall back to the DB status.
   const isLive = live ?? match.status === "live";
-  const phase = isLive ? LIVE_PHASE[match.status_short] ?? "LIVE" : null;
+  // FIFA-style running clock: prefer the live minute; HT shows "HT"; fall back
+  // to the phase label (1H/2H/…) only when no minute is available yet.
+  const phase = isLive
+    ? match.status_short === "HT"
+      ? "HT"
+      : minute != null
+        ? `${minute}'`
+        : LIVE_PHASE[match.status_short] ?? "LIVE"
+    : null;
 
   return (
     <Link

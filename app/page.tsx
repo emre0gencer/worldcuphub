@@ -1,5 +1,5 @@
 import MatchTimeline from "@/components/MatchTimeline";
-import { getAllMatches } from "@/lib/queries";
+import { getAllMatches, getLatestSnapshotMinute } from "@/lib/queries";
 import { resolveSeason } from "@/lib/season";
 
 // Live scores must always be fresh — render per request.
@@ -18,5 +18,14 @@ export default async function HomePage({ searchParams }: PageProps<"/">) {
     );
   }
 
-  return <MatchTimeline matches={matches} />;
+  // Latest live clock per in-play match (a handful at most) for the card badges.
+  const liveIds = matches.filter((m) => m.status === "live").map((m) => m.id);
+  const liveMinutes: Record<number, number | null> = {};
+  await Promise.all(
+    liveIds.map(async (id) => {
+      liveMinutes[id] = await getLatestSnapshotMinute(id);
+    }),
+  );
+
+  return <MatchTimeline matches={matches} liveMinutes={liveMinutes} />;
 }

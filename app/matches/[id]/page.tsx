@@ -7,6 +7,7 @@ import { widgetsEnabled } from "@/components/widgets/widgets-enabled";
 import {
   getFormForTeams,
   getLatestPrediction,
+  getLatestSnapshotMinute,
   getMatch,
   getMatchEvents,
   getMatchLineups,
@@ -44,7 +45,13 @@ function Logo({ team, size = "h-9 w-9" }: { team: Team | null; size?: string }) 
   return <img src={team.logo_url} alt={team.name} className={`${size} object-contain`} />;
 }
 
-function MatchHeader({ match }: { match: MatchWithTeams }) {
+function MatchHeader({
+  match,
+  liveMinute,
+}: {
+  match: MatchWithTeams;
+  liveMinute?: number | null;
+}) {
   const kickoff = new Date(match.kickoff_at);
   const stageLabel =
     match.stage === "group" && match.group_letter
@@ -87,8 +94,14 @@ function MatchHeader({ match }: { match: MatchWithTeams }) {
             </div>
           )}
           {match.status === "live" && (
-            <span className="mt-1 inline-flex items-center gap-1 text-xs font-semibold text-red-600">
-              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-red-600" /> LIVE
+            // FIFA-style running clock: pulsing dot + current minute (no seconds).
+            <span className="mt-1 inline-flex items-center gap-1.5 rounded-full bg-red-600 px-2.5 py-0.5 text-xs font-bold tabular-nums text-white">
+              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-white" />
+              {match.status_short === "HT"
+                ? "HT"
+                : liveMinute != null
+                  ? `${liveMinute}'`
+                  : "LIVE"}
             </span>
           )}
           {match.status === "finished" && (
@@ -294,7 +307,7 @@ async function LiveView({ match }: { match: MatchWithTeams }) {
       ) : (
         <section>
           <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-neutral-500">
-            Live stats · minute {latest.elapsed_minute ?? "–"}
+            Live stats
           </h2>
           <div className="rounded-xl border border-neutral-200 px-4 dark:border-neutral-800">
             {LIVE_STAT_ROWS.map((r) => (
@@ -569,9 +582,12 @@ export default async function MatchPage({ params }: PageProps<"/matches/[id]">) 
   const match = await getMatch(matchId);
   if (!match) notFound();
 
+  const liveMinute =
+    match.status === "live" ? await getLatestSnapshotMinute(matchId) : null;
+
   return (
     <div className="space-y-8">
-      <MatchHeader match={match} />
+      <MatchHeader match={match} liveMinute={liveMinute} />
       {match.status === "scheduled" && <ScheduledView match={match} />}
       {match.status === "live" && <LiveView match={match} />}
       {match.status === "finished" && <FinishedView match={match} />}

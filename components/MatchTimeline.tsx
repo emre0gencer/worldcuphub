@@ -44,7 +44,13 @@ function dayLabel(key: string, todayKey: string): { label: string; date: string 
   return { label: fullDate(key), date: null };
 }
 
-export default function MatchTimeline({ matches }: { matches: MatchWithTeams[] }) {
+export default function MatchTimeline({
+  matches,
+  liveMinutes = {},
+}: {
+  matches: MatchWithTeams[];
+  liveMinutes?: Record<number, number | null>;
+}) {
   // Re-evaluate live windows every minute without a server round-trip.
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -107,6 +113,7 @@ export default function MatchTimeline({ matches }: { matches: MatchWithTeams[] }
         date={date}
         matches={d.matches}
         now={now}
+        liveMinutes={liveMinutes}
         isToday={isToday}
         anchorRef={isToday ? anchorRef : undefined}
       />,
@@ -125,6 +132,7 @@ function DaySection({
   date,
   matches,
   now,
+  liveMinutes,
   isToday,
   anchorRef,
 }: {
@@ -132,6 +140,7 @@ function DaySection({
   date: string | null;
   matches: MatchWithTeams[];
   now: number;
+  liveMinutes: Record<number, number | null>;
   isToday: boolean;
   anchorRef?: React.RefObject<HTMLElement | null>;
 }) {
@@ -161,7 +170,7 @@ function DaySection({
       </div>
       <div className="flex flex-wrap gap-3">
         {matches.map((m) => (
-          <MatchCard key={m.id} match={m} live={isLiveNow(m, now)} />
+          <MatchCard key={m.id} match={m} live={isLiveNow(m, now)} minute={liveMinutes[m.id]} />
         ))}
       </div>
     </section>

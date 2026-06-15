@@ -52,6 +52,20 @@ export async function getSnapshotSeries(matchId: number): Promise<MatchSnapshot[
   return data as MatchSnapshot[];
 }
 
+/** Just the latest live clock (elapsed minute) for the scoreboard — avoids
+ *  pulling the full snapshot series when only the minute is needed. */
+export async function getLatestSnapshotMinute(matchId: number): Promise<number | null> {
+  const { data, error } = await getSupabase()
+    .from("match_snapshots")
+    .select("elapsed_minute")
+    .eq("match_id", matchId)
+    .order("captured_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return (data?.elapsed_minute as number | null) ?? null;
+}
+
 export async function getTeamMatchStats(matchId: number): Promise<TeamMatchStats[]> {
   const { data, error } = await getSupabase()
     .from("team_match_stats")
