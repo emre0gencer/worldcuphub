@@ -1,6 +1,6 @@
 # World Cup HUB
 
-A read-only data platform and web app for the FIFA World Cup — currently running as a fully-functional **2022 demo**, built to serve **2026 live data** with zero code changes.
+A read-only data platform and web app for the FIFA World Cup — currently running **live against the 2026 tournament**, with a fully-functional **2022 demo** available via `?season=2022`.
 
 The project's core thesis: don't just display data from an API — *own* it. Every match, player stat, team metric, and derived score is ingested into a private database, processed by a custom analytics layer, and surfaced through a purpose-built frontend. The result is an end-to-end data product, not a widget wrapper.
 
@@ -13,9 +13,9 @@ The project's core thesis: don't just display data from an API — *own* it. Eve
 A season-parameterized Python backend pulls data from [API-Football Pro](https://api-sports.io) and writes it into a Supabase Postgres database. Two modes:
 
 - **Backfill** (`backfill.py`) — full historical ingestion for a completed season. Batches fixture calls (~20 per request) to stay within API quota. Run: `python -m worldcup_worker.backfill --season 2022`
-- **Live ingestion** (`ingest.py`) — a long-running poll loop for the 2026 tournament. Discovers live matches infrequently (~300s), then polls only those matches every 60s. Stores the full time-series of raw snapshots per match to power momentum charts.
+- **Live ingestion** (`ingest.py`) — a long-running poll loop for the 2026 tournament. Discovers live matches infrequently (~300s), then polls only those matches every 60s. Stores the full time-series of raw snapshots per match to power momentum charts. Live polls are batched: all active matches are fetched in a single `/fixtures?ids=` call per cycle, so quota usage stays flat regardless of how many matches run simultaneously.
 
-The finalize step runs at full-time, promoting the last clean snapshot into the permanent stats tables — separating volatile live data from the immutable record.
+The finalize step runs at full-time, promoting the last clean snapshot into the permanent stats tables — separating volatile live data from the immutable record. A catch-up pass runs on every discovery cycle to re-finalize any match that slipped through due to a worker restart (the in-memory `tracked_live` set is empty on startup, so matches that ended during downtime are detected by querying for `finished` rows with no `team_match_stats` and finalized automatically).
 
 ### Three-track schema
 
@@ -100,9 +100,9 @@ All pages resolve a `?season=` param via a `SeasonSwitcher` in the nav — the s
 - **Home** — match cards grouped by stage with live/finished/upcoming states and score display.
 - **Match detail** (`/matches/[id]`) — three states:
   - *Scheduled* → pre-match H2H comparison, FIFA rankings, form ratings, prior meetings.
-  - *Live* → real-time stats from the latest snapshot; momentum charts from the full snapshot series.
-  - *Finished* → full final stats, timeline of goals/cards/substitutions, starting lineups with formations, per-player ratings.
-- **Standings** (`/standings`) — all 8 group tables computed from owned match results (P/W/D/L/GD/Pts/form), cross-checked against the API's stored standings with discrepancy reporting. Knockout bracket with results.
+  - *Live* → real-time stats from the latest snapshot; per-minute momentum charts (shots, shots on target) from the full snapshot series; auto-refreshes every 60s.
+  - *Finished* → full final stats, timeline of goals/cards/substitutions, starting lineups with formations, per-player ratings sorted by rating (unrated players at the bottom).
+- **Standings** (`/standings`) — all group tables computed from owned match results (P/W/D/L/GD/Pts/form). In-progress matches are folded in as provisional results: teams currently playing are highlighted in red with a live indicator, and the cross-check against the stored API standings skips them (stored standings lag live scores). The cross-check flags genuine data discrepancies (points, GD, played) but not rank differences, which are expected when teams are tied and FIFA applies head-to-head tiebreakers not implemented locally. Knockout bracket with results.
 - **Players** (`/players`) — leaderboards built from granular `player_match_stats` rows: top scorers, top assists, best ratings, yellow/red cards.
 - **Rankings** (`/rankings`) — Form Score table with attacking/defending sub-rankings, trend charts from `team_form` history, and upset probability column.
 
@@ -132,28 +132,31 @@ analytics batch job     ──────▶  stats + form + predictions ◀─
 
 ---
 
-## Current state — 2022 demo
+## Current state — 2026 live + 2022 demo
 
-The platform is fully functional against the completed 2022 FIFA World Cup:
+The platform is live against the 2026 FIFA World Cup group stage:
 
-- 64 matches ingested, including the full knockout bracket through Argentina–France in the final.
+- 72 fixtures across 12 groups (A–L), 48 teams, 415 players ingested.
+- Live ingestion worker running on Railway: discovers live matches every ~300s, polls them every 60s, writes a full snapshot time-series per match.
+- Finished matches fully finalized: team stats, player stats, events, lineups all written to Track 2. Catch-up finalization on every discovery cycle ensures no match is missed after a worker restart.
+- Group standings updated in real time, including in-progress match scores as provisional results.
+- Form Scores computed under `baseline-v3-xg` (xG + goals_prevented available from API-Football for 2026).
+- Player names resolved from the API payload at ingestion time; stub profiles (`Player {id}`) are no longer written for players missing from the `/players` endpoint.
+
+The 2022 demo remains fully functional at `?season=2022`:
+
+- 64 matches ingested through Argentina–France in the final.
 - 833 players with per-match granular stats.
-- Group standings computed and cross-checked clean against API standings.
-- Form Scores computed for all 32 teams across the tournament.
-- Match detail pages with timeline, lineups, and stats for every finished game.
-- Player leaderboards driven entirely by owned data.
+- Form Scores computed under `baseline-v2-noxg`.
+- Group standings, knockout bracket, match timelines, lineups, and player leaderboards all served from owned data.
 
 ---
 
 ## Future directions
 
-**2026 live tournament** — the immediate next step. The ingestion pipeline, analytics job, schema, and all frontend pages are already parameterized for `season=2026`. Pointing the live worker at the 2026 fixtures and deploying is the only required action. No new code paths.
-
 **Trained prediction model** — the current upset model is a calibrated sigmoid over Elo delta and Form Score delta. Once enough 2026 match results accumulate, this can be replaced with a Poisson regression or gradient-boosted model, gated behind the `model_version` column with no breaking changes to the frontend.
 
-**Per-minute stat normalization** — red cards and extra time distort per-match totals. Normalizing stats by minutes played is the most impactful data-quality improvement after 2026 data begins arriving.
-
-**Live momentum charts** — the full snapshot time-series is already stored in `match_snapshots`. Rendering per-minute momentum visualizations from this series (possession swings, shot bursts, pressure periods) requires only a frontend chart component.
+**Per-minute stat normalization** — red cards and extra time distort per-match totals. Normalizing stats by minutes played is the most impactful data-quality improvement as the 2026 tournament progresses.
 
 **YouTube highlights integration** — the `matches` table has a `youtube_highlight_id` column ready. Surfacing post-match highlights on the match detail page is a single-component addition.
 
@@ -182,5 +185,3 @@ For 2026 live ingestion:
 ```bash
 python -m worldcup_worker.ingest    # long-running poll loop; discovers + tracks live matches
 ```
-
----

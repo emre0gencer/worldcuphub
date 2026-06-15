@@ -55,19 +55,24 @@ def _update_match_row(sb, fx: dict[str, Any]) -> None:
     ).eq("id", fx["fixture"]["id"]).execute()
 
 
-def write_snapshots(api: ApiFootballClient, match_ids: set[int]) -> None:
+def write_snapshots(api: ApiFootballClient, match_ids: set[int]) -> set[str]:
     """One live poll for ALL tracked matches: a single batched /fixtures?ids=
     call (chunked by 20) returns goals + statistics for every live match, so
-    peak quota is ~1 call/cycle regardless of how many matches are live."""
+    peak quota is ~1 call/cycle regardless of how many matches are live.
+    Returns the set of status_short values seen (used by the caller to decide
+    whether to back off the poll interval during halftime)."""
     if not match_ids:
-        return
+        return set()
     rows = api.fixtures_by_ids(sorted(match_ids))
     captured_at = datetime.now(timezone.utc).isoformat()
     sb = db.client()
     seen: set[int] = set()
+    status_shorts: set[str] = set()
     for fx in rows:
         match_id = fx["fixture"]["id"]
         seen.add(match_id)
+        status_short = fx["fixture"]["status"].get("short", "")
+        status_shorts.add(status_short)
         payload: dict[str, Any] = {
             "fixture": fx["fixture"],
             "goals": fx["goals"],
@@ -86,6 +91,34 @@ def write_snapshots(api: ApiFootballClient, match_ids: set[int]) -> None:
         log.info("snapshot written for match %s (minute %s)", match_id, fx["fixture"]["status"].get("elapsed"))
     for missing in match_ids - seen:
         log.warning("fixture %s not found on live poll", missing)
+    return status_shorts
+
+
+# Statuses where match action is paused — stats don't update, safe to back off.
+_PAUSED_STATUSES = {"HT", "BT", "INT", "SUSP"}
+
+
+def seconds_until_next_kickoff(season: int) -> float | None:
+    """Query the DB for the nearest future scheduled kickoff and return seconds
+    until it. Returns None if no upcoming scheduled matches are found."""
+    sb = db.client()
+    now_iso = datetime.now(timezone.utc).isoformat()
+    result = (
+        sb.table("matches")
+        .select("kickoff_at")
+        .eq("season", season)
+        .eq("status", "scheduled")
+        .gt("kickoff_at", now_iso)
+        .order("kickoff_at", ascending=True)
+        .limit(1)
+        .execute()
+    )
+    if not result.data:
+        return None
+    kickoff_str = result.data[0]["kickoff_at"]
+    # Supabase returns timestamps with or without timezone suffix.
+    kickoff = datetime.fromisoformat(kickoff_str.replace("Z", "+00:00"))
+    return (kickoff - datetime.now(timezone.utc)).total_seconds()
 
 
 def finalize_match(api: ApiFootballClient, match_id: int) -> None:
@@ -154,11 +187,33 @@ def run() -> None:
                         log.warning("catch-up finalizing match %s (no team_match_stats)", fid)
                         finalize_match(api, fid)
 
-                write_snapshots(api, tracked_live)
+                status_shorts = write_snapshots(api, tracked_live)
             except Exception:
                 log.exception("poll cycle failed; retrying next interval")
+                status_shorts = set()
+        else:
+            status_shorts = set()
 
-        time.sleep(config.LIVE_POLL_INTERVAL if tracked_live else config.FIXTURE_DISCOVERY_INTERVAL)
+        if tracked_live:
+            # Back off during halftime / break time — stats are frozen, no need to
+            # poll every 60s. Resume normal cadence as soon as any match restarts.
+            all_paused = bool(status_shorts) and status_shorts <= _PAUSED_STATUSES
+            sleep_for = config.LIVE_POLL_INTERVAL * 2 if all_paused else config.LIVE_POLL_INTERVAL
+            if all_paused:
+                log.info("all live matches paused (%s) — backing off to %ds", status_shorts, sleep_for)
+        else:
+            # Smart idle: sleep until 10 minutes before the next kickoff so we
+            # don't burn discovery quota during long gaps between matches.
+            secs = seconds_until_next_kickoff(SEASON)
+            if secs is not None and secs > config.FIXTURE_DISCOVERY_INTERVAL:
+                # Wake up 10 min before kickoff, but never sleep longer than 30 min
+                # so we stay responsive to manual match rescheduling.
+                sleep_for = min(secs - 600, 1800)
+                log.info("next kickoff in %.0fs — sleeping %.0fs", secs, sleep_for)
+            else:
+                sleep_for = config.FIXTURE_DISCOVERY_INTERVAL
+
+        time.sleep(sleep_for)
 
 
 if __name__ == "__main__":
