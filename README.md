@@ -32,17 +32,66 @@ Every table carries a `season` column — `season=2022` and `season=2026` coexis
 
 ### Form Score — custom analytics model
 
-The analytics job (`analytics.py`) computes a **Form Score** for every team after each matchday. It is not a raw stats average — it is opponent-adjusted, recency-weighted, and shrinkage-corrected:
+The analytics job (`analytics.py`) computes a **Form Score** for every team after each matchday. It is not a raw stats average — it is opponent-adjusted, recency-weighted, shrinkage-corrected, and finally re-normalized across the field.
 
-1. **Opponent baselines** — rolling averages of what each opponent typically allows/creates (so beating a strong defense counts more than beating a weak one). Matchday-1 uses Elo-implied priors.
-2. **Opponent-adjusted per-match performance** — how far above or below each team's own output landed relative to the opponent's baseline.
-3. **Z-score normalization** — across all team-match rows so far, so scores are relative to the tournament field.
-4. **Weighted composites** — attacking and defending composites from goals, shots on target, shots, corners, and pass accuracy (xG omitted: API-Football does not provide xG for World Cup fixtures, verified against real data).
-5. **Recency weighting** — exponential decay (rho=0.7), so recent matches dominate.
-6. **Confidence shrinkage** — scores are pulled toward zero when sample size is small (n/(n+2)), with `sample_size` surfaced in the UI when n < 3.
-7. **Display scale** — mapped to a 0–100 scale where 50 = tournament average, ±1 std ≈ ±15 points.
+**Which model runs is chosen by data availability, not season number** (`run()` sets `use_xg` from whether any `team_match_stats` row carries `xg`):
 
-A **baseline upset probability model** sits on top: `p_favorite = sigmoid(a·ΔElo/400 + b·ΔOverallForm)`. Coefficients calibrate against results as the tournament runs.
+- **`baseline-v2-noxg`** — 2022, where API-Football returns no xG (verified in Phase-1 discovery). The xG terms are scratched and reweighted onto goals / shots on target / shots.
+- **`baseline-v3-xg`** — 2026+, where API-Football returns `expected_goals` and `goals_prevented`. xG-based signals dominate the composites (xG is the strongest single predictor of future performance — xG ≈ 0.91 correlation with goals; xGD is the most predictive composite for match outcomes).
+
+#### The math, step by step
+
+**Notation** — for team `T` in a match vs opponent `OPP`: `T.xg`, `T.goals_for`, `T.shots_on_target`, `T.shots`, `T.corners`, `T.pass_accuracy`, `T.goals_prevented` come from `T`'s own stat row; **defensive facts come from the opponent's row of the same match** (`OPP.xg` = T's expected goals against, `OPP.goals_for` = T's goals against). This join is consistency-checked (`opponent.goals_for == team.goals_against`).
+
+**Step 1 — Rolling opponent baselines.** For each baseline stat (`{goals_for, shots_on_target, shots}`, plus `xg` when available), compute, *from each opponent's matches prior to this one*, the mean it **creates** (`_F`) and **allows** (`_A`). Matchday-1 fallback: tournament global mean seeded with an Elo-implied prior (`±10%` output per 100 Elo vs the 1500 base).
+
+**Step 2 — Opponent-adjusted per-match performance.**
+
+```
+adjA_xg    = T.xg              - xg_A(OPP)            # chance quality created vs what OPP allows  (xG model)
+adjA_goals = T.goals_for       - goals_for_A(OPP)
+adjA_sot   = T.shots_on_target - shots_on_target_A(OPP)
+adjA_shots = T.shots           - shots_A(OPP)
+adjD_xg    = xg_F(OPP)         - OPP.xg              # chance quality suppressed                  (xG model)
+adjD_goals = goals_for_F(OPP)  - OPP.goals_for
+adjD_sot   = shots_on_target_F(OPP) - OPP.shots_on_target
+adjD_shots = shots_F(OPP)      - OPP.shots
+finishing_delta = T.goals_for  - T.xg               # clinical (+) / wasteful (−) finishing      (xG model)
+goals_prevented = T.goals_prevented                 # defensive overperformance from the API     (xG model)
+```
+
+**Step 3 — Z-score normalization** of every series above across all team-match rows in the season so far, so each signal is on a comparable scale.
+
+**Step 4 — Per-match composites** (weights sum to 1.0):
+
+```
+# baseline-v3-xg (2026)
+A(m) = 0.35·z(adjA_xg) + 0.20·z(adjA_goals) + 0.15·z(adjA_sot) + 0.10·z(adjA_shots)
+     + 0.10·z(finishing_delta) + 0.05·z(corners) + 0.05·z(pass_accuracy)
+D(m) = 0.30·z(adjD_xg) + 0.25·z(adjD_goals) + 0.20·z(goals_prevented)
+     + 0.15·z(adjD_sot) + 0.10·z(adjD_shots)
+
+# baseline-v2-noxg (2022)
+A(m) = 0.40·z(adjA_goals) + 0.30·z(adjA_sot) + 0.20·z(adjA_shots) + 0.05·z(corners) + 0.05·z(pass_accuracy)
+D(m) = 0.45·z(adjD_goals) + 0.35·z(adjD_sot) + 0.20·z(adjD_shots)
+```
+
+**Step 5 — Recency weighting** — exponential decay `w_i = ρ^(n−i)`, `ρ = 0.7`, so the newest match dominates: `AttackForm = Σ wᵢ·A(mᵢ) / Σ wᵢ` (and likewise `DefendForm`).
+
+**Step 6 — Confidence shrinkage** — `shrink = n/(n+2)`; `AttackForm` and `DefendForm` are multiplied by it so few-match teams stay near the mean. `sample_size` is surfaced in the UI when n < 3.
+
+**Step 7 — Display normalization (0–100).** `OverallForm = 0.5·AttackForm + 0.5·DefendForm`. Because the per-match composites are already z-scores, shrinkage + the attack/defend average compress the *team-level* spread into a narrow band early on (everyone ≈47–54 after one matchday). So each team's final attack / defend / overall value is **re-z-scored across the field** (using the teams that have actually played as the reference distribution) before the display map `clamp(50 + 15·z, 0, 100)`. Result: tournament average = 50, +1 std ≈ 65, +2 std ≈ 80, with a legible spread instead of a flat band. (The `baseline-v2-noxg` path keeps the original direct map `clamp(50 + 15·overall, 0, 100)` so the 2022 demo is unchanged.)
+
+A **baseline upset probability model** sits on top:
+
+```
+# baseline-v2-noxg
+p_favorite = sigmoid(1.0·ΔElo/400 + 0.5·ΔOverallForm)
+# baseline-v3-xg — adds cumulative xG difference (xG − xGA) per match
+p_favorite = sigmoid(0.8·ΔElo/400 + 0.4·ΔOverallForm + 0.3·ΔxGD)
+```
+
+Deltas are taken favorite-minus-underdog (favorite = higher Elo). Coefficients calibrate against results as the tournament runs; the active `model_version` is stored on every prediction.
 
 ### Frontend pages (Next.js)
 

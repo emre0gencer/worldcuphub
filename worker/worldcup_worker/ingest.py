@@ -55,31 +55,37 @@ def _update_match_row(sb, fx: dict[str, Any]) -> None:
     ).eq("id", fx["fixture"]["id"]).execute()
 
 
-def write_snapshot(api: ApiFootballClient, match_id: int) -> None:
-    """One live poll: store the raw stats blob + scores as a Track 1 snapshot.
-    A single batched call returns goals + statistics together."""
-    rows = api.fixtures_by_ids([match_id])
-    if not rows:
-        log.warning("fixture %s not found on live poll", match_id)
+def write_snapshots(api: ApiFootballClient, match_ids: set[int]) -> None:
+    """One live poll for ALL tracked matches: a single batched /fixtures?ids=
+    call (chunked by 20) returns goals + statistics for every live match, so
+    peak quota is ~1 call/cycle regardless of how many matches are live."""
+    if not match_ids:
         return
-    fx = rows[0]
-    payload: dict[str, Any] = {
-        "fixture": fx["fixture"],
-        "goals": fx["goals"],
-        "statistics": fx["statistics"],
-    }
+    rows = api.fixtures_by_ids(sorted(match_ids))
+    captured_at = datetime.now(timezone.utc).isoformat()
     sb = db.client()
-    sb.table("match_snapshots").insert(
-        {
-            "match_id": match_id,
-            "season": SEASON,
-            "captured_at": datetime.now(timezone.utc).isoformat(),
-            "elapsed_minute": fx["fixture"]["status"].get("elapsed"),
-            "payload": payload,
+    seen: set[int] = set()
+    for fx in rows:
+        match_id = fx["fixture"]["id"]
+        seen.add(match_id)
+        payload: dict[str, Any] = {
+            "fixture": fx["fixture"],
+            "goals": fx["goals"],
+            "statistics": fx["statistics"],
         }
-    ).execute()
-    _update_match_row(sb, fx)
-    log.info("snapshot written for match %s (minute %s)", match_id, fx["fixture"]["status"].get("elapsed"))
+        sb.table("match_snapshots").insert(
+            {
+                "match_id": match_id,
+                "season": SEASON,
+                "captured_at": captured_at,
+                "elapsed_minute": fx["fixture"]["status"].get("elapsed"),
+                "payload": payload,
+            }
+        ).execute()
+        _update_match_row(sb, fx)
+        log.info("snapshot written for match %s (minute %s)", match_id, fx["fixture"]["status"].get("elapsed"))
+    for missing in match_ids - seen:
+        log.warning("fixture %s not found on live poll", missing)
 
 
 def finalize_match(api: ApiFootballClient, match_id: int) -> None:
@@ -115,8 +121,7 @@ def run() -> None:
                             finalize_match(api, finished_id)
                     tracked_live = live_ids
 
-                for match_id in tracked_live:
-                    write_snapshot(api, match_id)
+                write_snapshots(api, tracked_live)
             except Exception:
                 log.exception("poll cycle failed; retrying next interval")
 

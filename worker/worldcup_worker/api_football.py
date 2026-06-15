@@ -7,6 +7,7 @@ if the API starts returning new stat types (e.g. expected_goals for 2026),
 """
 
 import logging
+import re
 from typing import Any, Iterator
 
 import httpx
@@ -186,6 +187,9 @@ _TEAM_STAT_MAP = {
     "Total passes": ("passes", _int),
     "Passes accurate": ("passes_accurate", _int),
     "Passes %": ("pass_accuracy", _num),
+    # Advanced metrics (present from 2026 onward; absent for 2022).
+    "expected_goals": ("xg", _num),
+    "goals_prevented": ("goals_prevented", _num),
 }
 
 _unknown_stat_types: set[str] = set()
@@ -317,11 +321,19 @@ def parse_lineups(
 
 # ── standings / teams / players ──────────────────────────────────────────────
 
+# The 48-team (2026) format returns an extra cross-group ranking table named
+# "Group Stage" (best third-placed teams), duplicating teams already listed in
+# their lettered group. We store only the real per-team group tables.
+_GROUP_NAME_RE = re.compile(r"^Group [A-Z]$")
+
+
 def parse_standings(response: list[dict[str, Any]], season: int) -> list[dict[str, Any]]:
     rows = []
     for league_entry in response:
         for group in league_entry["league"]["standings"]:
             for r in group:
+                if not _GROUP_NAME_RE.match(r["group"] or ""):
+                    continue
                 rows.append(
                     {
                         "season": season,

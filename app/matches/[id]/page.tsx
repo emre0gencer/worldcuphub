@@ -427,6 +427,9 @@ async function FinishedView({ match }: { match: MatchWithTeams }) {
           </h2>
           <div className="rounded-xl border border-neutral-200 px-4 dark:border-neutral-800">
             <StatBar label="Possession" home={hs.possession} away={as.possession} format={(v) => `${v.toFixed(0)}%`} />
+            {(hs.xg != null || as.xg != null) && (
+              <StatBar label="xG" home={hs.xg} away={as.xg} format={(v) => v.toFixed(2)} />
+            )}
             <StatBar label="Shots" home={hs.shots} away={as.shots} />
             <StatBar label="On target" home={hs.shots_on_target} away={as.shots_on_target} />
             <StatBar label="Off target" home={hs.shots_off_target} away={as.shots_off_target} />
@@ -438,6 +441,9 @@ async function FinishedView({ match }: { match: MatchWithTeams }) {
             <StatBar label="Yellow cards" home={hs.yellow_cards} away={as.yellow_cards} />
             <StatBar label="Red cards" home={hs.red_cards} away={as.red_cards} />
             <StatBar label="Saves" home={hs.saves} away={as.saves} />
+            {(hs.goals_prevented != null || as.goals_prevented != null) && (
+              <StatBar label="Goals prevented" home={hs.goals_prevented} away={as.goals_prevented} format={(v) => v.toFixed(2)} />
+            )}
             <StatBar label="Passes" home={hs.passes} away={as.passes} />
             <StatBar label="Pass accuracy" home={hs.pass_accuracy} away={as.pass_accuracy} format={(v) => `${v.toFixed(0)}%`} />
           </div>

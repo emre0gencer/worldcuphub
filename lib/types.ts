@@ -106,6 +106,8 @@ export interface TeamMatchStats {
   passes: number | null;
   passes_accurate: number | null;
   pass_accuracy: number | null;
+  xg: number | null;
+  goals_prevented: number | null;
 }
 
 export interface PlayerMatchStats {
