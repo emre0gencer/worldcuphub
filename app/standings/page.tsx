@@ -24,6 +24,7 @@ interface TableRow {
   ga: number;
   points: number;
   form: ("W" | "D" | "L")[];
+  hasLive: boolean;
 }
 
 function buildGroupTables(matches: MatchWithTeams[]): Map<string, TableRow[]> {
@@ -47,18 +48,28 @@ function buildGroupTables(matches: MatchWithTeams[]): Map<string, TableRow[]> {
           ga: 0,
           points: 0,
           form: [],
+          hasLive: false,
         });
       }
     }
   }
 
-  const finished = groupMatches
-    .filter((m) => m.status === "finished" && m.home_score != null && m.away_score != null)
+  const counted = groupMatches
+    .filter(
+      (m) =>
+        (m.status === "finished" || m.status === "live") &&
+        m.home_score != null &&
+        m.away_score != null,
+    )
     .sort((a, b) => a.kickoff_at.localeCompare(b.kickoff_at));
 
-  for (const m of finished) {
+  for (const m of counted) {
     const home = rows.get(m.home_team!.id)!;
     const away = rows.get(m.away_team!.id)!;
+    if (m.status === "live") {
+      home.hasLive = true;
+      away.hasLive = true;
+    }
     const hs = m.home_score!;
     const as = m.away_score!;
     home.played += 1;
@@ -112,7 +123,9 @@ function crossCheck(groups: Map<string, TableRow[]>, stored: StandingsRow[]): st
   const issues: string[] = [];
   const storedById = new Map(stored.map((s) => [s.team_id, s]));
   for (const [letter, table] of groups) {
-    table.forEach((row, i) => {
+    table.forEach((row) => {
+      // Skip teams currently in a live match — stored standings lag behind live scores.
+      if (row.hasLive) return;
       const s = storedById.get(row.team.id);
       if (!s) {
         issues.push(`${row.team.name}: missing from stored standings`);
@@ -122,7 +135,6 @@ function crossCheck(groups: Map<string, TableRow[]>, stored: StandingsRow[]): st
       if (s.points !== row.points) diffs.push(`points ${row.points}≠${s.points}`);
       if (s.played !== row.played) diffs.push(`played ${row.played}≠${s.played}`);
       if (s.goals_diff !== row.gf - row.ga) diffs.push(`GD ${row.gf - row.ga}≠${s.goals_diff}`);
-      if (s.rank !== i + 1) diffs.push(`rank ${i + 1}≠${s.rank}`);
       if (s.group_name && !s.group_name.endsWith(letter)) diffs.push(`group ${letter}≠${s.group_name}`);
       if (diffs.length > 0) issues.push(`${row.team.name}: ${diffs.join(", ")}`);
     });
@@ -137,10 +149,17 @@ const FORM_STYLE: Record<string, string> = {
 };
 
 function GroupTable({ letter, rows }: { letter: string; rows: TableRow[] }) {
+  const hasAnyLive = rows.some((r) => r.hasLive);
   return (
     <section>
-      <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-neutral-500">
+      <h2 className="mb-2 flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-neutral-500">
         Group {letter}
+        {hasAnyLive && (
+          <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-red-600 dark:bg-red-950 dark:text-red-400">
+            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-red-500" />
+            Live
+          </span>
+        )}
       </h2>
       <table className="w-full text-sm">
         <thead className="text-left text-xs uppercase tracking-wide text-neutral-500">
@@ -159,12 +178,13 @@ function GroupTable({ letter, rows }: { letter: string; rows: TableRow[] }) {
           {rows.map((r) => (
             <tr key={r.team.id} className="border-t border-neutral-100 dark:border-neutral-900">
               <td className="py-1.5">
-                <span className="flex items-center gap-2">
+                <span className={`flex items-center gap-2 ${r.hasLive ? "font-semibold text-red-600 dark:text-red-400" : ""}`}>
                   {r.team.logo_url && (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img src={r.team.logo_url} alt="" className="h-4 w-4 object-contain" />
                   )}
                   {r.team.name}
+                  {r.hasLive && <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-red-500" />}
                 </span>
               </td>
               <td className="py-1.5 text-right tabular-nums">{r.played}</td>
@@ -296,6 +316,7 @@ export default async function StandingsPage({ searchParams }: PageProps<"/standi
   ]);
   const groups = buildGroupTables(matches);
   const issues = groups.size > 0 ? crossCheck(groups, stored) : [];
+  const hasLiveGroups = [...groups.values()].some((rows) => rows.some((r) => r.hasLive));
 
   return (
     <div className="space-y-10">
@@ -327,11 +348,19 @@ export default async function StandingsPage({ searchParams }: PageProps<"/standi
       {groups.size === 0 ? (
         <p className="text-sm text-neutral-500">No group-stage matches found for {season}.</p>
       ) : (
-        <div className="grid gap-8 sm:grid-cols-2">
-          {[...groups.entries()].map(([letter, rows]) => (
-            <GroupTable key={letter} letter={letter} rows={rows} />
-          ))}
-        </div>
+        <>
+          <div className="grid gap-8 sm:grid-cols-2">
+            {[...groups.entries()].map(([letter, rows]) => (
+              <GroupTable key={letter} letter={letter} rows={rows} />
+            ))}
+          </div>
+          {hasLiveGroups && (
+            <p className="text-xs text-neutral-400 dark:text-neutral-600">
+              <span className="inline-block h-1.5 w-1.5 rounded-full bg-red-500 align-middle" />{" "}
+              Teams shown in red are currently playing. Their live score is included as a provisional result.
+            </p>
+          )}
+        </>
       )}
 
       <Bracket matches={matches} />

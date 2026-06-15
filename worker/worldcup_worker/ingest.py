@@ -101,6 +101,33 @@ def finalize_match(api: ApiFootballClient, match_id: int) -> None:
     log.info("finalized match %s", match_id)
 
 
+def find_unfinalized_match_ids(season: int) -> list[int]:
+    """Return IDs of finished matches (per DB) that have no team_match_stats yet.
+
+    Catches matches that slipped through finalization due to a worker restart
+    or any other gap between live tracking and the finalize step.
+    """
+    sb = db.client()
+    finished = (
+        sb.table("matches")
+        .select("id")
+        .eq("season", season)
+        .eq("status", "finished")
+        .execute()
+    )
+    if not finished.data:
+        return []
+    finished_ids = [r["id"] for r in finished.data]
+    with_stats = (
+        sb.table("team_match_stats")
+        .select("match_id")
+        .in_("match_id", finished_ids)
+        .execute()
+    )
+    done = {r["match_id"] for r in with_stats.data}
+    return [fid for fid in finished_ids if fid not in done]
+
+
 def run() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
     api = ApiFootballClient()
@@ -120,6 +147,12 @@ def run() -> None:
                         if statuses.get(finished_id) == "finished":
                             finalize_match(api, finished_id)
                     tracked_live = live_ids
+                    # Catch-up: finalize any finished match that slipped through
+                    # (e.g. worker was restarted while a match was live — tracked_live
+                    # starts empty so the transition is never witnessed directly).
+                    for fid in find_unfinalized_match_ids(SEASON):
+                        log.warning("catch-up finalizing match %s (no team_match_stats)", fid)
+                        finalize_match(api, fid)
 
                 write_snapshots(api, tracked_live)
             except Exception:

@@ -550,6 +550,7 @@ async function FinishedView({ match }: { match: MatchWithTeams }) {
                   <tbody>
                     {playerStats
                       .filter((p) => p.team_id === team.id && (p.minutes ?? 0) > 0)
+                      .sort((a, b) => (b.rating ?? -1) - (a.rating ?? -1))
                       .map((p) => (
                         <tr key={p.id} className="border-t border-neutral-100 dark:border-neutral-900">
                           <td className="py-1">{p.player?.name ?? p.player_id}</td>

@@ -225,6 +225,7 @@ def parse_player_stats(team_entry: dict[str, Any], season: int) -> list[dict[str
         rows.append(
             {
                 "player_id": p["player"]["id"],
+                "player_name": p["player"]["name"],
                 "team_id": team_entry["team"]["id"],
                 "season": season,
                 "minutes": s["games"]["minutes"],

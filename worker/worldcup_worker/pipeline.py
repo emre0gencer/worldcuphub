@@ -148,7 +148,10 @@ def ingest_fixture_details(sb, fx: dict[str, Any], season: int, force: bool = Fa
     if team_rows:
         sb.table("team_match_stats").insert(team_rows).execute()
     if player_rows:
-        sb.table("player_match_stats").insert(player_rows).execute()
+        # player_name is carried for ensure_player_stubs but is not a column on
+        # player_match_stats (name lives on the players table).
+        insert_player_rows = [{k: v for k, v in r.items() if k != "player_name"} for r in player_rows]
+        sb.table("player_match_stats").insert(insert_player_rows).execute()
     if event_rows:
         sb.table("match_events").insert(event_rows).execute()
     if lineup_teams:
