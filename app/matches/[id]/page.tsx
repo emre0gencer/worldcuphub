@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import AutoRefresh from "@/components/AutoRefresh";
 import MomentumChart, { type MomentumPoint } from "@/components/MomentumChart";
 import StatBar from "@/components/StatBar";
 import ApiSportsWidget from "@/components/widgets/ApiSportsWidget";
@@ -224,6 +225,46 @@ async function ScheduledView({ match }: { match: MatchWithTeams }) {
 
 // ── live ─────────────────────────────────────────────────────────────────────
 
+// Every team stat the API reports for a fixture, in display order — the same
+// rows shown for finished matches, sourced from the live snapshot blob instead.
+// Rows whose stat is absent in the current snapshot are skipped (see LiveStatRow).
+const LIVE_STAT_ROWS: { type: string; label: string; format?: (v: number) => string }[] = [
+  { type: "Ball Possession", label: "Possession", format: (v) => `${v.toFixed(0)}%` },
+  { type: "expected_goals", label: "xG", format: (v) => v.toFixed(2) },
+  { type: "Total Shots", label: "Shots" },
+  { type: "Shots on Goal", label: "On target" },
+  { type: "Shots off Goal", label: "Off target" },
+  { type: "Blocked Shots", label: "Blocked shots" },
+  { type: "Shots insidebox", label: "Shots inside box" },
+  { type: "Shots outsidebox", label: "Shots outside box" },
+  { type: "Corner Kicks", label: "Corners" },
+  { type: "Offsides", label: "Offsides" },
+  { type: "Fouls", label: "Fouls" },
+  { type: "Yellow Cards", label: "Yellow cards" },
+  { type: "Red Cards", label: "Red cards" },
+  { type: "Goalkeeper Saves", label: "Saves" },
+  { type: "goals_prevented", label: "Goals prevented", format: (v) => v.toFixed(2) },
+  { type: "Total passes", label: "Passes" },
+  { type: "Passes accurate", label: "Accurate passes" },
+  { type: "Passes %", label: "Pass accuracy", format: (v) => `${v.toFixed(0)}%` },
+];
+
+/** A live StatBar that renders nothing unless the stat is present for a side. */
+function LiveStatRow({
+  home,
+  away,
+  label,
+  format,
+}: {
+  home: number | null;
+  away: number | null;
+  label: string;
+  format?: (v: number) => string;
+}) {
+  if (home == null && away == null) return null;
+  return <StatBar label={label} home={home} away={away} format={format} />;
+}
+
 async function LiveView({ match }: { match: MatchWithTeams }) {
   const home = match.home_team!;
   const away = match.away_team!;
@@ -242,6 +283,8 @@ async function LiveView({ match }: { match: MatchWithTeams }) {
 
   return (
     <div className="space-y-8">
+      {/* Re-pull the latest snapshot every 60s without a full reload. */}
+      <AutoRefresh />
       {widgetsEnabled && (
         // Official live view: events, lineups, team + player statistics
         <ApiSportsWidget data-type="game" data-game-id={String(match.id)} data-game-tab="statistics" />
@@ -254,11 +297,15 @@ async function LiveView({ match }: { match: MatchWithTeams }) {
             Live stats · minute {latest.elapsed_minute ?? "–"}
           </h2>
           <div className="rounded-xl border border-neutral-200 px-4 dark:border-neutral-800">
-            <StatBar label="Possession" home={stat("Ball Possession", home.id)} away={stat("Ball Possession", away.id)} format={(v) => `${v.toFixed(0)}%`} />
-            <StatBar label="Shots" home={stat("Total Shots", home.id)} away={stat("Total Shots", away.id)} />
-            <StatBar label="On target" home={stat("Shots on Goal", home.id)} away={stat("Shots on Goal", away.id)} />
-            <StatBar label="Corners" home={stat("Corner Kicks", home.id)} away={stat("Corner Kicks", away.id)} />
-            <StatBar label="Fouls" home={stat("Fouls", home.id)} away={stat("Fouls", away.id)} />
+            {LIVE_STAT_ROWS.map((r) => (
+              <LiveStatRow
+                key={r.type}
+                label={r.label}
+                home={stat(r.type, home.id)}
+                away={stat(r.type, away.id)}
+                format={r.format}
+              />
+            ))}
           </div>
         </section>
       )}

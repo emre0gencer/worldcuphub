@@ -11,6 +11,19 @@ const STAGE_LABEL: Record<string, string> = {
   final: "Final",
 };
 
+// Map an API "short" status to a compact live-phase label for the badge.
+const LIVE_PHASE: Record<string, string> = {
+  "1H": "1H",
+  "2H": "2H",
+  HT: "HT",
+  ET: "ET",
+  BT: "ET",
+  P: "PEN",
+  SUSP: "SUSP",
+  INT: "INT",
+  LIVE: "LIVE",
+};
+
 function TeamRow({
   team,
   score,
@@ -39,28 +52,45 @@ function TeamRow({
   );
 }
 
-export default function MatchCard({ match }: { match: MatchWithTeams }) {
+export default function MatchCard({
+  match,
+  live,
+}: {
+  match: MatchWithTeams;
+  live?: boolean;
+}) {
   const kickoff = new Date(match.kickoff_at);
+  // `live` is supplied by the timeline (time-aware); fall back to the DB status.
+  const isLive = live ?? match.status === "live";
+  const phase = isLive ? LIVE_PHASE[match.status_short] ?? "LIVE" : null;
+
   return (
     <Link
       href={`/matches/${match.id}`}
-      className="block w-56 shrink-0 rounded-xl border border-neutral-200 dark:border-neutral-800 p-4 transition-colors hover:border-neutral-400 dark:hover:border-neutral-600"
+      className={
+        "block w-56 shrink-0 rounded-xl border p-4 transition-colors " +
+        (isLive
+          ? "border-red-500/60 bg-red-50/70 ring-1 ring-red-500/30 hover:border-red-500 dark:bg-red-950/20"
+          : "border-neutral-200 hover:border-neutral-400 dark:border-neutral-800 dark:hover:border-neutral-600")
+      }
     >
-      <div className="mb-3 flex items-center justify-between text-xs text-neutral-500">
-        <span>
+      <div className="mb-3 flex items-center justify-between text-xs">
+        <span className="text-neutral-500">
           {match.stage === "group" && match.group_letter
             ? `Group ${match.group_letter}`
             : STAGE_LABEL[match.stage]}
         </span>
-        {match.status === "live" ? (
-          <span className="flex items-center gap-1 font-semibold text-red-600">
-            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-red-600" />
-            LIVE
+        {isLive ? (
+          <span className="flex items-center gap-1.5 rounded-full bg-red-600 px-2 py-0.5 font-semibold text-white">
+            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-white" />
+            {phase}
           </span>
         ) : match.status === "finished" ? (
-          <span>{match.pen_home != null ? "PEN" : match.status_short === "AET" ? "AET" : "FT"}</span>
+          <span className="text-neutral-500">
+            {match.pen_home != null ? "PEN" : match.status_short === "AET" ? "AET" : "FT"}
+          </span>
         ) : (
-          <span className="tabular-nums">
+          <span className="tabular-nums text-neutral-500">
             {kickoff.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}
           </span>
         )}

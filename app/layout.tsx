@@ -3,6 +3,7 @@ import Link from "next/link";
 import { Geist, Geist_Mono } from "next/font/google";
 import ApiSportsConfig from "@/components/widgets/ApiSportsConfig";
 import SeasonSwitcher from "@/components/SeasonSwitcher";
+import HomeLink from "@/components/HomeLink";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -33,13 +34,13 @@ export default function RootLayout({
       <body className="min-h-full flex flex-col font-sans">
         <header className="border-b border-neutral-200 dark:border-neutral-800">
           <nav className="mx-auto flex max-w-5xl items-center gap-6 px-4 py-4">
-            <Link href="/" className="text-lg font-bold tracking-tight">
+            <HomeLink className="text-lg font-bold tracking-tight">
               World Cup <span className="text-neutral-400">HUB</span>
-            </Link>
+            </HomeLink>
             <div className="flex gap-4 text-sm text-neutral-500">
-              <Link href="/" className="hover:text-neutral-900 dark:hover:text-neutral-100">
+              <HomeLink className="hover:text-neutral-900 dark:hover:text-neutral-100">
                 Matches
-              </Link>
+              </HomeLink>
               <Link href="/standings" className="hover:text-neutral-900 dark:hover:text-neutral-100">
                 Standings
               </Link>
