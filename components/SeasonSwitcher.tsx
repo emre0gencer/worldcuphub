@@ -14,15 +14,15 @@ function Switcher() {
   if (pathname.startsWith("/matches/")) return null;
 
   return (
-    <div className="ml-auto flex gap-1 rounded-lg border border-neutral-200 p-0.5 text-xs dark:border-neutral-800">
+    <div className="ml-auto flex gap-0.5 rounded-lg border border-border-warm bg-surface p-0.5 font-mono text-xs">
       {SEASONS.map((s) => (
         <Link
           key={s}
           href={s === DEFAULT_SEASON ? pathname : `${pathname}?season=${s}`}
-          className={`rounded-md px-2 py-1 tabular-nums ${
+          className={`rounded-md px-2 py-1 tabular-nums transition-colors ${
             s === current
-              ? "bg-neutral-900 font-semibold text-white dark:bg-neutral-100 dark:text-neutral-900"
-              : "text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-100"
+              ? "bg-ink font-semibold text-paper"
+              : "text-muted hover:text-ink"
           }`}
         >
           {s}

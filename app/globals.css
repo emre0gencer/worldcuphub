@@ -1,61 +1,121 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  /* ── Surfaces & ink (warm "paper stock" almanac palette) ─────────────── */
+  --color-background: #f6f1e8;
+  --color-foreground: #1b1613;
+  --color-paper: #f6f1e8;
+  --color-surface: #fffdf8;
+  --color-surface-warm: #f1e9dc;
+  --color-ink: #1b1613;
+  --color-border-warm: #e4d9c6;
+  --color-border-light: #efe7d8;
+  --color-muted: #8c8170;
+
+  /* ── Foil gold accent ────────────────────────────────────────────────── */
+  --color-accent: #b08842;
+  --color-accent-light: #ecdfc4;
+  --color-foil: #b08842;
+  --color-foil-bright: #d8b56a;
+
+  /* ── Sporting accents ────────────────────────────────────────────────── */
+  --color-pitch: #2f6b4f;
+  --color-flare: #c0492f;
+
+  /* ── Type ────────────────────────────────────────────────────────────── */
+  --font-sans: var(--font-hanken), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-fraunces), Georgia, "Times New Roman", serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+/* Force light mode regardless of OS preference */
+html {
+  color-scheme: light only;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background-color: #f6f1e8;
+  color: #1b1613;
+  font-family: var(--font-sans);
+  font-feature-settings: "ss01", "cv01";
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
-/* ── API-Sports widgets theme ─────────────────────────────────────────────
-   Overrides the widget CSS variables (data-theme="white" base) to match the
-   minimal neutral design. See https://widgets.api-sports.io docs. */
-api-sports-widget {
-  display: block;
-  --primary-font-size: 0.875rem;
-  --secondary-font-size: 0.75rem;
-  --tertiary-font-size: 0.72rem;
-  --background-color: var(--background);
-  --text-color: var(--foreground);
-  --border: 1px solid #e5e5e5; /* neutral-200 */
-  --hover: #f5f5f5; /* neutral-100 */
+/* ── Paper grain — a faint fixed texture over the whole page ────────────── */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  pointer-events: none;
+  opacity: 0.04;
+  mix-blend-mode: multiply;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
 }
 
-@media (prefers-color-scheme: dark) {
-  api-sports-widget {
-    --border: 1px solid #262626; /* neutral-800 */
-    --hover: #171717; /* neutral-900 */
+/* ── Display + editorial helpers ───────────────────────────────────────── */
+.font-display {
+  font-family: var(--font-display);
+  font-optical-sizing: auto;
+}
+
+/* Foil-stamped text — for the wordmark and headline accents */
+.foil-text {
+  background-image: linear-gradient(
+    100deg,
+    #9a722f 0%,
+    #d8b56a 38%,
+    #f3e2b4 50%,
+    #d8b56a 62%,
+    #9a722f 100%
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* Small uppercase index / eyebrow above section titles */
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--color-foil);
+}
+
+/* Hairline rule that fades out — separates editorial sections */
+.hairline {
+  height: 1px;
+  background-image: linear-gradient(
+    to right,
+    var(--color-border-warm),
+    transparent
+  );
+}
+
+/* ── Orchestrated page-load reveal (staggered via --d) ─────────────────── */
+@keyframes reveal-up {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
   }
 }
 
-/* Built-in team/player/game modals opened via data-target-*="modal" */
-.modal-widget {
-  background: rgba(0, 0, 0, 0.55);
+.reveal {
+  animation: reveal-up 0.62s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  animation-delay: var(--d, 0ms);
 }
 
-.modal-widget-content {
-  max-width: 56rem;
-  width: calc(100% - 2rem);
-  max-height: 85vh;
-  overflow-y: auto;
-  border-radius: 1rem;
-  background: var(--background);
+@media (prefers-reduced-motion: reduce) {
+  .reveal {
+    animation: none;
+  }
+  body::after {
+    display: none;
+  }
 }

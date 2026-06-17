@@ -21,17 +21,17 @@ export default function StatBar({
   return (
     <div className="py-2">
       <div className="mb-1 flex items-center justify-between text-sm">
-        <span className="tabular-nums font-semibold">{home == null ? "–" : format(h)}</span>
-        <span className="text-xs uppercase tracking-wide text-neutral-500">{label}</span>
-        <span className="tabular-nums font-semibold">{away == null ? "–" : format(a)}</span>
+        <span className="font-mono tabular-nums font-semibold">{home == null ? "–" : format(h)}</span>
+        <span className="text-[0.7rem] uppercase tracking-[0.12em] text-muted">{label}</span>
+        <span className="font-mono tabular-nums font-semibold">{away == null ? "–" : format(a)}</span>
       </div>
       <div className="flex h-1.5 gap-0.5 overflow-hidden rounded-full">
         <div
-          className={homeColor ? undefined : "bg-neutral-900 dark:bg-neutral-100"}
+          className={homeColor ? undefined : "bg-neutral-900"}
           style={{ width: `${homeShare}%`, ...(homeColor ? { backgroundColor: homeColor } : {}) }}
         />
         <div
-          className={awayColor ? undefined : "bg-neutral-300 dark:bg-neutral-700"}
+          className={awayColor ? undefined : "bg-neutral-300"}
           style={{ width: `${100 - homeShare}%`, ...(awayColor ? { backgroundColor: awayColor } : {}) }}
         />
       </div>

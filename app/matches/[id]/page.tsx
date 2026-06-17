@@ -4,8 +4,6 @@ import EloDelta from "@/components/EloDelta";
 import { getTeamColors } from "@/lib/team-colors";
 import MomentumChart, { type MomentumPoint } from "@/components/MomentumChart";
 import StatBar from "@/components/StatBar";
-import ApiSportsWidget from "@/components/widgets/ApiSportsWidget";
-import { widgetsEnabled } from "@/components/widgets/widgets-enabled";
 import {
   getFormForTeams,
   getLatestPrediction,
@@ -43,7 +41,7 @@ const STAGE_LABEL: Record<string, string> = {
 
 function Logo({ team, size = "h-9 w-9" }: { team: Team | null; size?: string }) {
   if (!team?.logo_url)
-    return <span className={`${size} rounded bg-neutral-200 dark:bg-neutral-800`} />;
+    return <span className={`${size} rounded bg-surface-warm`} />;
   // eslint-disable-next-line @next/next/no-img-element
   return <img src={team.logo_url} alt={team.name} className={`${size} object-contain`} />;
 }
@@ -72,36 +70,36 @@ function MatchHeader({
         : "Full time";
 
   return (
-    <div className="rounded-2xl border border-neutral-200 p-6 text-center dark:border-neutral-800">
-      <p className="mb-1 text-xs uppercase tracking-wide text-neutral-500">
+    <div className="reveal rounded-2xl border border-border-warm bg-surface p-6 text-center shadow-sm">
+      <p className="eyebrow mb-1.5">
         {stageLabel}
-        {" · "}
+        {"  ·  "}
         {kickoff.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })}
-        {match.venue ? ` · ${match.venue}${match.venue_city ? `, ${match.venue_city}` : ""}` : ""}
+        {match.venue ? `  ·  ${match.venue}${match.venue_city ? `, ${match.venue_city}` : ""}` : ""}
       </p>
       {match.referee && (
-        <p className="mb-4 text-xs text-neutral-400">Referee: {match.referee}</p>
+        <p className="mb-4 text-xs text-muted">Referee: {match.referee}</p>
       )}
       <div className="flex items-center justify-center gap-6">
         <div className="flex w-40 flex-col items-center gap-2">
           <Logo team={match.home_team} />
-          <span className="font-semibold">{match.home_team?.name ?? "TBD"}</span>
+          <span className="font-display text-lg font-bold tracking-tight">{match.home_team?.name ?? "TBD"}</span>
           {homeSeason?.initial_elo != null && (
-            <span className="text-xs text-neutral-500">
+            <span className="text-xs text-muted">
               <EloDelta current={homeSeason.elo} initial={homeSeason.initial_elo} />
             </span>
           )}
         </div>
         <div className="w-32">
           {match.status === "scheduled" ? (
-            <div className="text-lg font-semibold tabular-nums">
+            <div className="font-mono text-lg font-semibold tabular-nums">
               {kickoff.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}
-              <div className="text-xs font-normal text-neutral-500">
+              <div className="text-xs font-normal text-muted">
                 {kickoff.toLocaleDateString(undefined, { month: "short", day: "numeric" })}
               </div>
             </div>
           ) : (
-            <div className="text-4xl font-bold tabular-nums">
+            <div className="font-display text-5xl font-black tabular-nums text-ink">
               {match.home_score} – {match.away_score}
             </div>
           )}
@@ -117,7 +115,7 @@ function MatchHeader({
             </span>
           )}
           {match.status === "finished" && (
-            <div className="mt-1 space-y-0.5 text-xs text-neutral-500">
+            <div className="mt-1 space-y-0.5 text-xs text-muted">
               <div>{finishedLabel}</div>
               {match.pen_home != null && (
                 <div className="font-semibold tabular-nums">
@@ -140,9 +138,9 @@ function MatchHeader({
         </div>
         <div className="flex w-40 flex-col items-center gap-2">
           <Logo team={match.away_team} />
-          <span className="font-semibold">{match.away_team?.name ?? "TBD"}</span>
+          <span className="font-display text-lg font-bold tracking-tight">{match.away_team?.name ?? "TBD"}</span>
           {awaySeason?.initial_elo != null && (
-            <span className="text-xs text-neutral-500">
+            <span className="text-xs text-muted">
               <EloDelta current={awaySeason.elo} initial={awaySeason.initial_elo} />
             </span>
           )}
@@ -166,7 +164,7 @@ async function ScheduledView({
   const home = match.home_team;
   const away = match.away_team;
   if (!home || !away) {
-    return <p className="text-sm text-neutral-500">Teams will be decided by the previous round.</p>;
+    return <p className="text-sm text-muted">Teams will be decided by the previous round.</p>;
   }
   const homeColor = getTeamColors(home.country_code).main;
   const awayColor = getTeamColors(away.country_code).secondary;
@@ -182,10 +180,10 @@ async function ScheduledView({
   return (
     <div className="space-y-8">
       <section>
-        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-neutral-500">
+        <h2 className="mb-2 eyebrow">
           Head to head
         </h2>
-        <div className="rounded-xl border border-neutral-200 px-4 dark:border-neutral-800">
+        <div className="rounded-xl border border-border-warm bg-surface px-4">
           <StatBar
             label="FIFA ranking"
             home={homeSeason?.fifa_ranking ?? null}
@@ -201,7 +199,7 @@ async function ScheduledView({
                   ? <EloDelta current={homeSeason.elo} initial={homeSeason.initial_elo} />
                   : "–"}
               </span>
-              <span className="text-xs uppercase tracking-wide text-neutral-500">Elo</span>
+              <span className="text-[0.7rem] uppercase tracking-[0.12em] text-muted">Elo</span>
               <span className="font-semibold">
                 {awaySeason
                   ? <EloDelta current={awaySeason.elo} initial={awaySeason.initial_elo} />
@@ -232,7 +230,7 @@ async function ScheduledView({
           )}
         </div>
         {homeForm && awayForm && (homeForm.sample_size < 3 || awayForm.sample_size < 3) && (
-          <p className="mt-2 text-xs text-neutral-400">
+          <p className="mt-2 text-xs text-muted">
             Form based on {homeForm.sample_size} / {awayForm.sample_size} matches — early-tournament estimates are noisy.
           </p>
         )}
@@ -240,21 +238,21 @@ async function ScheduledView({
 
       {prediction && (
         <section>
-          <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-neutral-500">
+          <h2 className="mb-2 eyebrow">
             Prediction <span className="font-normal normal-case">({prediction.model_version})</span>
           </h2>
-          <div className="rounded-xl border border-neutral-200 p-4 dark:border-neutral-800">
-            <div className="mb-1 flex justify-between text-sm font-semibold tabular-nums">
-              <span>{home.name} {(prediction.home_win_prob * 100).toFixed(0)}%</span>
-              <span className="text-neutral-500">Draw {(prediction.draw_prob * 100).toFixed(0)}%</span>
-              <span>{away.name} {(prediction.away_win_prob * 100).toFixed(0)}%</span>
+          <div className="rounded-xl border border-border-warm bg-surface p-4 shadow-sm">
+            <div className="mb-1 flex justify-between text-sm font-semibold">
+              <span>{home.name} <span className="font-mono tabular-nums">{(prediction.home_win_prob * 100).toFixed(0)}%</span></span>
+              <span className="text-muted">Draw <span className="font-mono tabular-nums">{(prediction.draw_prob * 100).toFixed(0)}%</span></span>
+              <span>{away.name} <span className="font-mono tabular-nums">{(prediction.away_win_prob * 100).toFixed(0)}%</span></span>
             </div>
             <div className="flex h-2 gap-0.5 overflow-hidden rounded-full">
-              <div className="bg-neutral-900 dark:bg-neutral-100" style={{ width: `${prediction.home_win_prob * 100}%` }} />
-              <div className="bg-neutral-400" style={{ width: `${prediction.draw_prob * 100}%` }} />
-              <div className="bg-neutral-300 dark:bg-neutral-700" style={{ width: `${prediction.away_win_prob * 100}%` }} />
+              <div className="bg-ink" style={{ width: `${prediction.home_win_prob * 100}%` }} />
+              <div className="bg-[#cdbfa3]" style={{ width: `${prediction.draw_prob * 100}%` }} />
+              <div className="bg-foil" style={{ width: `${prediction.away_win_prob * 100}%` }} />
             </div>
-            <div className="mt-3 flex justify-between text-xs text-neutral-500">
+            <div className="mt-3 flex justify-between font-mono text-xs text-muted">
               <span>
                 Expected goals: {prediction.predicted_home_goals?.toFixed(1)} – {prediction.predicted_away_goals?.toFixed(1)}
               </span>
@@ -265,14 +263,11 @@ async function ScheduledView({
       )}
 
       <section>
-        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-neutral-500">
+        <h2 className="mb-2 eyebrow">
           Prior meetings
         </h2>
-        {widgetsEnabled ? (
-          // Official historical head-to-head (all-time, via API-Sports widget)
-          <ApiSportsWidget data-type="h2h" data-h2h={`${home.id}-${away.id}`} />
-        ) : priorMeetings.length === 0 ? (
-          <p className="text-sm text-neutral-500">No previous meetings in stored tournaments.</p>
+        {priorMeetings.length === 0 ? (
+          <p className="text-sm text-muted">No previous meetings in stored tournaments.</p>
         ) : (
           <ul className="space-y-1 text-sm">
             {priorMeetings.map((m) => (
@@ -372,18 +367,14 @@ async function LiveView({ match }: { match: MatchWithTeams }) {
     <div className="space-y-8">
       {/* Re-pull the latest snapshot every 60s without a full reload. */}
       <AutoRefresh />
-      {widgetsEnabled && (
-        // Official live view: events, lineups, team + player statistics
-        <ApiSportsWidget data-type="game" data-game-id={String(match.id)} data-game-tab="statistics" />
-      )}
       {!latest ? (
-        <p className="text-sm text-neutral-500">Waiting for the first live snapshot…</p>
+        <p className="text-sm text-muted">Waiting for the first live snapshot…</p>
       ) : (
         <section>
-          <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-neutral-500">
+          <h2 className="mb-2 eyebrow">
             Live stats
           </h2>
-          <div className="rounded-xl border border-neutral-200 px-4 dark:border-neutral-800">
+          <div className="rounded-xl border border-border-warm bg-surface px-4">
             {LIVE_STAT_ROWS.map((r) => (
               <LiveStatRow
                 key={r.type}
@@ -402,14 +393,14 @@ async function LiveView({ match }: { match: MatchWithTeams }) {
       {/* Momentum charts — horizontal scroll carousel, one snap per chart */}
       {snapshots.length > 0 && (
         <section>
-          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-neutral-500">
+          <h2 className="mb-3 eyebrow">
             Momentum
           </h2>
           <div className="flex snap-x snap-mandatory gap-4 overflow-x-auto pb-3">
             {MOMENTUM_CHARTS.map((c) => (
               <div
                 key={c.type}
-                className="w-[calc(100%-2rem)] shrink-0 snap-start rounded-xl border border-neutral-200 p-4 sm:w-80 dark:border-neutral-800"
+                className="w-[calc(100%-2rem)] shrink-0 snap-start rounded-xl border border-border-warm bg-surface p-4 sm:w-80"
               >
                 <MomentumChart
                   title={c.title}
@@ -457,18 +448,18 @@ function EventsTimeline({ events, match }: { events: MatchEvent[]; match: MatchW
         <span className="mr-1">{eventIcon(e)}</span>
         <span className="font-medium">{e.player_name}</span>
         {e.type === "subst" && e.assist_name && (
-          <span className="text-neutral-500"> ⟶ {e.assist_name}</span>
+          <span className="text-muted"> ⟶ {e.assist_name}</span>
         )}
         {e.type === "Goal" && e.assist_name && (
-          <span className="text-neutral-500"> (assist: {e.assist_name})</span>
+          <span className="text-muted"> (assist: {e.assist_name})</span>
         )}
-        {e.type === "Var" && <span className="text-neutral-500"> — {e.detail}</span>}
+        {e.type === "Var" && <span className="text-muted"> — {e.detail}</span>}
       </span>
     );
     return (
       <li key={e.id} className="grid grid-cols-[1fr_3.5rem_1fr] items-center gap-2 py-1 text-sm">
         <span className="text-right">{isHome ? text : null}</span>
-        <span className="text-center text-xs tabular-nums text-neutral-400">{minute}</span>
+        <span className="text-center text-xs tabular-nums text-muted">{minute}</span>
         <span>{!isHome ? text : null}</span>
       </li>
     );
@@ -476,18 +467,16 @@ function EventsTimeline({ events, match }: { events: MatchEvent[]; match: MatchW
 
   return (
     <section>
-      <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-neutral-500">
+      <h2 className="mb-2 eyebrow">
         Timeline
       </h2>
-      <ul className="rounded-xl border border-neutral-200 px-4 py-2 dark:border-neutral-800">
+      <ul className="rounded-xl border border-border-warm bg-surface px-4 py-2">
         {regular.map(row)}
       </ul>
       {shootout.length > 0 && (
         <>
-          <h3 className="mt-4 mb-2 text-xs font-semibold uppercase tracking-wide text-neutral-500">
-            Penalty shootout
-          </h3>
-          <ul className="rounded-xl border border-neutral-200 px-4 py-2 dark:border-neutral-800">
+          <h3 className="eyebrow mt-4 mb-2">Penalty shootout</h3>
+          <ul className="rounded-xl border border-border-warm bg-surface px-4 py-2">
             {shootout.map(row)}
           </ul>
         </>
@@ -511,32 +500,32 @@ function LineupColumn({
   const subs = players.filter((p) => !p.starter);
   return (
     <div>
-      <h3 className="mb-1 text-sm font-semibold">
+      <h3 className="mb-1 font-display text-base font-bold tracking-tight">
         {team.name}
         {lineup?.formation && (
-          <span className="ml-2 font-normal text-neutral-500">{lineup.formation}</span>
+          <span className="ml-2 font-mono text-xs font-normal text-muted">{lineup.formation}</span>
         )}
       </h3>
       {lineup?.coach_name && (
-        <p className="mb-2 text-xs text-neutral-500">Coach: {lineup.coach_name}</p>
+        <p className="mb-2 text-xs text-muted">Coach: {lineup.coach_name}</p>
       )}
       <ul className="space-y-0.5 text-sm">
         {starters.map((p) => (
           <li key={p.id} className="flex gap-2">
-            <span className="w-6 text-right tabular-nums text-neutral-400">{p.shirt_number}</span>
-            <span className="w-4 text-xs leading-5 text-neutral-400">{p.position}</span>
+            <span className="w-6 text-right tabular-nums text-muted">{p.shirt_number}</span>
+            <span className="w-4 text-xs leading-5 text-muted">{p.position}</span>
             <span>{p.player_name}</span>
           </li>
         ))}
       </ul>
       {subs.length > 0 && (
         <>
-          <p className="mt-3 mb-1 text-xs uppercase tracking-wide text-neutral-400">Substitutes</p>
-          <ul className="space-y-0.5 text-sm text-neutral-500">
+          <p className="mt-3 mb-1 text-xs uppercase tracking-wide text-muted">Substitutes</p>
+          <ul className="space-y-0.5 text-sm text-muted">
             {subs.map((p) => (
               <li key={p.id} className="flex gap-2">
-                <span className="w-6 text-right tabular-nums text-neutral-400">{p.shirt_number}</span>
-                <span className="w-4 text-xs leading-5 text-neutral-400">{p.position}</span>
+                <span className="w-6 text-right tabular-nums text-muted">{p.shirt_number}</span>
+                <span className="w-4 text-xs leading-5 text-muted">{p.position}</span>
                 <span>{p.player_name}</span>
               </li>
             ))}
@@ -555,34 +544,26 @@ async function FinishedView({ match }: { match: MatchWithTeams }) {
   const homeColor = getTeamColors(home.country_code).main;
   const awayColor = getTeamColors(away.country_code).secondary;
 
-  const [teamStats, playerStats, events, lineups] = await Promise.all([
+  const [teamStats, playerStats, events, lineups, snapshots] = await Promise.all([
     getTeamMatchStats(match.id),
     getPlayerMatchStats(match.id),
     getMatchEvents(match.id),
     getMatchLineups(match.id),
+    getSnapshotSeries(match.id),
   ]);
   const hs = teamStats.find((s) => s.team_id === home.id);
   const as = teamStats.find((s) => s.team_id === away.id);
 
   return (
     <div className="space-y-8">
-      {widgetsEnabled && (
-        // Official post-match view — owned Track 2 data renders below it.
-        <ApiSportsWidget
-          data-type="game"
-          data-game-id={String(match.id)}
-          data-game-tab="statistics"
-        />
-      )}
-
       {events.length > 0 && <EventsTimeline events={events} match={match} />}
 
       {hs && as && (
         <section>
-          <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-neutral-500">
+          <h2 className="mb-2 eyebrow">
             Match stats
           </h2>
-          <div className="rounded-xl border border-neutral-200 px-4 dark:border-neutral-800">
+          <div className="rounded-xl border border-border-warm bg-surface px-4">
             <StatBar label="Possession" home={hs.possession} away={as.possession} format={(v) => `${v.toFixed(0)}%`} homeColor={homeColor} awayColor={awayColor} />
             {(hs.xg != null || as.xg != null) && (
               <StatBar label="xG" home={hs.xg} away={as.xg} format={(v) => v.toFixed(2)} homeColor={homeColor} awayColor={awayColor} />
@@ -607,9 +588,61 @@ async function FinishedView({ match }: { match: MatchWithTeams }) {
         </section>
       )}
 
+      {/* Momentum charts — only available for live-ingested matches */}
+      {(() => {
+        if (snapshots.length === 0) {
+          return (
+            <section>
+              <h2 className="mb-2 eyebrow">
+                Momentum
+              </h2>
+              <div className="rounded-xl border border-border-warm bg-surface px-4 py-5 text-center text-sm text-muted">
+                Momentum charts are not available for this match — it was not live-ingested.
+              </div>
+            </section>
+          );
+        }
+        const charts = MOMENTUM_CHARTS
+          .map((c) => ({
+            ...c,
+            data: snapshots.map((s) => ({
+              minute: s.elapsed_minute ?? 0,
+              home: snapshotStat(s.payload.statistics, home.id, c.type) ?? 0,
+              away: snapshotStat(s.payload.statistics, away.id, c.type) ?? 0,
+            })),
+          }))
+          .filter((c) => c.data.length > 0);
+        if (charts.length === 0) return null;
+        return (
+          <section>
+            <h2 className="mb-3 eyebrow">
+              Momentum
+            </h2>
+            <div className="flex snap-x snap-mandatory gap-4 overflow-x-auto pb-3">
+              {charts.map((c) => (
+                <div
+                  key={c.type}
+                  className="w-[calc(100%-2rem)] shrink-0 snap-start rounded-xl border border-border-warm bg-surface p-4 sm:w-80"
+                >
+                  <MomentumChart
+                    title={c.title}
+                    data={c.data}
+                    homeName={home.name}
+                    awayName={away.name}
+                    homeColor={homeColor}
+                    awayColor={awayColor}
+                    curveType={c.curveType ?? "stepAfter"}
+                  />
+                </div>
+              ))}
+            </div>
+          </section>
+        );
+      })()}
+
       {lineups.players.length > 0 && (
         <section>
-          <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-neutral-500">
+          <h2 className="mb-2 eyebrow">
             Lineups
           </h2>
           <div className="grid gap-6 sm:grid-cols-2">
@@ -627,15 +660,15 @@ async function FinishedView({ match }: { match: MatchWithTeams }) {
 
       {playerStats.length > 0 && (
         <section>
-          <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-neutral-500">
+          <h2 className="mb-2 eyebrow">
             Player ratings
           </h2>
           <div className="grid gap-6 sm:grid-cols-2">
             {[home, away].map((team) => (
               <div key={team.id}>
-                <h3 className="mb-2 text-sm font-semibold">{team.name}</h3>
+                <h3 className="mb-2 font-display text-base font-bold tracking-tight">{team.name}</h3>
                 <table className="w-full text-sm">
-                  <thead className="text-left text-xs uppercase tracking-wide text-neutral-500">
+                  <thead className="text-left font-mono text-[0.65rem] uppercase tracking-[0.1em] text-muted">
                     <tr>
                       <th className="py-1 font-normal">Player</th>
                       <th className="py-1 text-right font-normal">Min</th>
@@ -649,12 +682,12 @@ async function FinishedView({ match }: { match: MatchWithTeams }) {
                       .filter((p) => p.team_id === team.id && (p.minutes ?? 0) > 0)
                       .sort((a, b) => (b.rating ?? -1) - (a.rating ?? -1))
                       .map((p) => (
-                        <tr key={p.id} className="border-t border-neutral-100 dark:border-neutral-900">
+                        <tr key={p.id} className="border-t border-border-light">
                           <td className="py-1">{p.player?.name ?? p.player_id}</td>
-                          <td className="py-1 text-right tabular-nums">{p.minutes}</td>
-                          <td className="py-1 text-right tabular-nums">{p.goals || ""}</td>
-                          <td className="py-1 text-right tabular-nums">{p.assists || ""}</td>
-                          <td className="py-1 text-right font-semibold tabular-nums">
+                          <td className="py-1 text-right font-mono tabular-nums">{p.minutes}</td>
+                          <td className="py-1 text-right font-mono tabular-nums">{p.goals || ""}</td>
+                          <td className="py-1 text-right font-mono tabular-nums">{p.assists || ""}</td>
+                          <td className="py-1 text-right font-mono font-semibold tabular-nums text-ink">
                             {p.rating?.toFixed(1) ?? "–"}
                           </td>
                         </tr>

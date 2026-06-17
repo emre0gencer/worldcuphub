@@ -8,12 +8,12 @@ export default function FormBadge({
 }) {
   const tone =
     value >= 60
-      ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
+      ? "bg-emerald-50 text-emerald-700 ring-emerald-600/15"
       : value <= 40
-        ? "bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300"
-        : "bg-neutral-100 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300";
+        ? "bg-red-50 text-red-700 ring-red-600/15"
+        : "bg-surface-warm text-ink ring-border-warm";
   return (
-    <span className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-sm font-semibold tabular-nums ${tone}`}>
+    <span className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 font-mono text-sm font-semibold tabular-nums ring-1 ring-inset ${tone}`}>
       {value.toFixed(1)}
       {sampleSize !== undefined && sampleSize < 3 && (
         <span title={`Based on only ${sampleSize} match${sampleSize === 1 ? "" : "es"} — noisy early-tournament estimate`} className="text-xs font-normal opacity-60">

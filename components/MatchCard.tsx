@@ -116,11 +116,11 @@ function TeamRow({
         </div>
       </div>
       <div className="flex items-baseline gap-1 shrink-0">
-        <span className="text-lg tabular-nums font-bold">
+        <span className="font-mono text-lg tabular-nums font-bold">
           {score ?? ""}
         </span>
         {pens != null && (
-          <span className="text-xs tabular-nums font-bold">
+          <span className="font-mono text-xs tabular-nums font-bold">
             ({pens})
           </span>
         )}
@@ -166,30 +166,30 @@ export default function MatchCard({
     <Link
       href={`/matches/${match.id}`}
       className={
-        "block w-56 shrink-0 overflow-hidden rounded-xl border transition-shadow hover:shadow-lg " +
+        "block w-56 shrink-0 overflow-hidden rounded-xl border bg-surface shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-xl " +
         (isLive
           ? "border-red-500/60 ring-1 ring-red-500/30"
-          : "border-neutral-200 dark:border-neutral-800")
+          : "border-border-warm")
       }
     >
       {/* Header */}
-      <div className="flex items-center justify-between bg-white px-3.5 pt-2.5 pb-2 text-xs dark:bg-neutral-950">
-        <span className="text-neutral-500">
+      <div className="flex items-center justify-between bg-surface px-3.5 pt-2.5 pb-2">
+        <span className="font-mono text-[0.62rem] uppercase tracking-[0.14em] text-foil">
           {match.stage === "group" && match.group_letter
             ? `Group ${match.group_letter}`
             : STAGE_LABEL[match.stage]}
         </span>
         {isLive ? (
-          <span className="flex items-center gap-1.5 rounded-full bg-red-600 px-2 py-0.5 font-semibold text-white">
+          <span className="flex items-center gap-1.5 rounded-full bg-red-600 px-2 py-0.5 font-mono text-[0.65rem] font-semibold text-white">
             <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-white" />
             {phase}
           </span>
         ) : match.status === "finished" ? (
-          <span className="text-neutral-500">
+          <span className="font-mono text-[0.65rem] tracking-wide text-muted">
             {match.pen_home != null ? "PEN" : match.status_short === "AET" ? "AET" : "FT"}
           </span>
         ) : (
-          <span className="tabular-nums text-neutral-500">
+          <span className="font-mono text-[0.7rem] tabular-nums text-muted">
             {kickoff.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}
           </span>
         )}

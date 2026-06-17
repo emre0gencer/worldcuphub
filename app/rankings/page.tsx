@@ -1,6 +1,7 @@
 import Link from "next/link";
 import EloDelta from "@/components/EloDelta";
 import FormBadge from "@/components/FormBadge";
+import SectionHeading, { Kicker } from "@/components/SectionHeading";
 import FormTrendChart, { type FormTrendSeries } from "@/components/FormTrendChart";
 import {
   getAllMatches,
@@ -30,18 +31,18 @@ function RankingTable({
   const sorted = [...rows].sort((a, b) => value(b) - value(a)).slice(0, 12);
   return (
     <div>
-      <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-neutral-500">{title}</h2>
-      <ol className="rounded-xl border border-neutral-200 dark:border-neutral-800">
+      <h3 className="eyebrow mb-2.5">{title}</h3>
+      <ol className="overflow-hidden rounded-xl border border-border-warm bg-surface shadow-sm">
         {sorted.map((f, i) => {
           const team = teams.get(f.team_id);
           const ts = teamSeasons.get(f.team_id);
           return (
             <li
               key={f.team_id}
-              className="flex items-center justify-between gap-2 border-b border-neutral-100 px-3 py-2 last:border-b-0 dark:border-neutral-900"
+              className="flex items-center justify-between gap-2 border-b border-border-light px-3 py-2 transition-colors last:border-b-0 hover:bg-surface-warm"
             >
               <div className="flex items-center gap-2 min-w-0">
-                <span className="w-5 text-right text-xs tabular-nums text-neutral-400">{i + 1}</span>
+                <span className="w-5 text-right font-mono text-xs tabular-nums text-foil">{i + 1}</span>
                 {team?.logo_url && (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img src={team.logo_url} alt="" className="h-3.5 w-3.5 object-contain" />
@@ -49,7 +50,7 @@ function RankingTable({
                 <span className="truncate text-sm">{team?.name ?? f.team_id}</span>
               </div>
               <div className="flex items-center gap-3">
-                <span className="text-xs text-neutral-400">
+                <span className="text-xs text-muted">
                   <EloDelta current={ts?.elo ?? null} initial={ts?.initial_elo ?? null} />
                 </span>
                 <FormBadge value={value(f)} sampleSize={f.sample_size} />
@@ -97,53 +98,56 @@ export default async function RankingsPage({ searchParams }: PageProps<"/ranking
     .slice(0, 8);
 
   return (
-    <div className="space-y-10">
-      <section>
-        <h1 className="mb-1 text-xl font-bold">Form rankings</h1>
-        <p className="text-sm text-neutral-500">
-          Opponent-adjusted Form Scores, recomputed each matchday. 50 = tournament average;
-          small sample sizes (n&lt;3) are noisy.
-        </p>
+    <div className="space-y-12">
+      <section className="reveal">
+        <SectionHeading
+          eyebrow="Form &amp; momentum"
+          title="Form Rankings"
+          standfirst={
+            <>
+              Opponent-adjusted Form Scores, recomputed each matchday. 50 = tournament
+              average; small sample sizes (n&lt;3) are noisy.
+            </>
+          }
+        />
       </section>
 
       {latestForm.length === 0 && (
-        <p className="text-sm text-neutral-500">No form data for {season} yet.</p>
+        <p className="text-sm text-muted">No form data for {season} yet.</p>
       )}
 
-      <div className="grid gap-8 md:grid-cols-3">
+      <div className="reveal grid gap-8 md:grid-cols-3" style={{ "--d": "80ms" } as React.CSSProperties}>
         <RankingTable title="Overall form" rows={latestForm} teams={teams} teamSeasons={teamSeasons} value={(f) => f.overall_form} />
         <RankingTable title="Attacking form" rows={latestForm} teams={teams} teamSeasons={teamSeasons} value={(f) => f.attacking_form} />
         <RankingTable title="Defending form" rows={latestForm} teams={teams} teamSeasons={teamSeasons} value={(f) => f.defending_form} />
       </div>
 
-      <section>
-        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-neutral-500">
-          Form trend — top 6
-        </h2>
+      <section className="reveal" style={{ "--d": "160ms" } as React.CSSProperties}>
+        <Kicker>
+          Form trend <span className="text-sm font-normal text-muted">— top 6</span>
+        </Kicker>
         <FormTrendChart series={series} />
       </section>
 
-      <section>
-        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-neutral-500">
-          Upset watch
-        </h2>
-        <ul className="rounded-xl border border-neutral-200 dark:border-neutral-800">
+      <section className="reveal" style={{ "--d": "200ms" } as React.CSSProperties}>
+        <Kicker>Upset watch</Kicker>
+        <ul className="overflow-hidden rounded-xl border border-border-warm bg-surface shadow-sm">
           {upsetWatch.map((p) => {
             const m = matchById.get(p.match_id);
             if (!m) return null;
             return (
-              <li key={p.match_id} className="border-b border-neutral-100 last:border-b-0 dark:border-neutral-900">
+              <li key={p.match_id} className="border-b border-border-light last:border-b-0">
                 <Link
                   href={`/matches/${m.id}`}
-                  className="flex items-center justify-between px-3 py-2 text-sm hover:bg-neutral-50 dark:hover:bg-neutral-900"
+                  className="flex items-center justify-between px-3 py-2 text-sm hover:bg-surface-warm"
                 >
                   <span>
                     {m.home_team?.name ?? "TBD"} vs {m.away_team?.name ?? "TBD"}
-                    <span className="ml-2 text-xs text-neutral-400">
+                    <span className="ml-2 font-mono text-xs text-muted">
                       {new Date(m.kickoff_at).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
                     </span>
                   </span>
-                  <span className="font-semibold tabular-nums">
+                  <span className="font-mono font-semibold tabular-nums text-foil">
                     {(p.upset_probability * 100).toFixed(0)}%
                   </span>
                 </Link>

@@ -152,22 +152,22 @@ function DaySection({
   const liveCount = matches.filter((m) => isLiveNow(m, now)).length;
   return (
     <section ref={anchorRef} id={isToday ? "today-anchor" : undefined} className="scroll-mt-24">
-      <div className="mb-3 flex items-center gap-3">
+      <div className="mb-3 flex items-baseline gap-3">
         <h2
           className={
             isToday
-              ? "text-base font-bold tracking-tight"
-              : "text-sm font-semibold uppercase tracking-wide text-neutral-500"
+              ? "font-display text-2xl font-black tracking-tight text-ink"
+              : "font-mono text-xs font-semibold uppercase tracking-[0.14em] text-foil"
           }
         >
           {label}
         </h2>
         {date && (
-          <span className="text-xs font-normal normal-case text-neutral-400">{date}</span>
+          <span className="text-xs font-normal normal-case text-muted">{date}</span>
         )}
-        <span className="h-px flex-1 bg-gradient-to-r from-neutral-200 to-transparent dark:from-neutral-800" />
+        <span className="h-px flex-1 self-center bg-gradient-to-r from-border-warm to-transparent" />
         {liveCount > 0 && (
-          <span className="flex items-center gap-1.5 text-xs font-semibold text-red-600">
+          <span className="flex items-center gap-1.5 font-mono text-xs font-semibold text-red-600">
             <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-red-600" />
             {liveCount} live
           </span>
@@ -191,12 +191,12 @@ function TodayMarker({
 }) {
   return (
     <section ref={anchorRef} id="today-anchor" className="scroll-mt-24">
-      <div className="mb-3 flex items-center gap-3">
-        <h2 className="text-base font-bold tracking-tight">Today</h2>
-        <span className="text-xs font-normal text-neutral-400">{date}</span>
-        <span className="h-px flex-1 bg-gradient-to-r from-neutral-200 to-transparent dark:from-neutral-800" />
+      <div className="mb-3 flex items-baseline gap-3">
+        <h2 className="font-display text-2xl font-black tracking-tight text-ink">Today</h2>
+        <span className="text-xs font-normal text-muted">{date}</span>
+        <span className="h-px flex-1 self-center bg-gradient-to-r from-border-warm to-transparent" />
       </div>
-      <p className="text-sm text-neutral-500">
+      <p className="text-sm text-muted">
         No fixtures today — scroll up for past results, down for what&apos;s next.
       </p>
     </section>

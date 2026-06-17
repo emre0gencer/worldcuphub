@@ -150,7 +150,14 @@ def ingest_fixture_details(sb, fx: dict[str, Any], season: int, force: bool = Fa
     if player_rows:
         # player_name is carried for ensure_player_stubs but is not a column on
         # player_match_stats (name lives on the players table).
-        insert_player_rows = [{k: v for k, v in r.items() if k != "player_name"} for r in player_rows]
+        # Deduplicate by (match_id, player_id) — API can return player_id=0 duplicates.
+        seen: set[tuple[int, int]] = set()
+        insert_player_rows = []
+        for r in player_rows:
+            key = (r["match_id"], r["player_id"])
+            if key not in seen:
+                seen.add(key)
+                insert_player_rows.append({k: v for k, v in r.items() if k != "player_name"})
         sb.table("player_match_stats").insert(insert_player_rows).execute()
     if event_rows:
         sb.table("match_events").insert(event_rows).execute()

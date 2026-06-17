@@ -15,7 +15,7 @@ export default async function HomePage({ searchParams }: PageProps<"/">) {
 
   if (matches.length === 0) {
     return (
-      <p className="text-sm text-neutral-500">
+      <p className="text-sm text-muted">
         No fixtures for {season} yet. Check back once the schedule is published.
       </p>
     );

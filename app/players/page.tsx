@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import SectionHeading from "@/components/SectionHeading";
 import { getPlayerSeasonStats } from "@/lib/queries";
 import { resolveSeason } from "@/lib/season";
 import type { PlayerSeasonStats } from "@/lib/types";
@@ -22,17 +23,15 @@ function Leaderboard({
 }) {
   return (
     <div>
-      <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-neutral-500">
-        {title}
-      </h2>
-      <ol className="rounded-xl border border-neutral-200 dark:border-neutral-800">
+      <h2 className="eyebrow mb-2.5">{title}</h2>
+      <ol className="overflow-hidden rounded-xl border border-border-warm bg-surface shadow-sm">
         {rows.map((p, i) => (
           <li
             key={p.player_id}
-            className="flex items-center justify-between gap-2 border-b border-neutral-100 px-3 py-2 last:border-b-0 dark:border-neutral-900"
+            className="flex items-center justify-between gap-2 border-b border-border-light px-3 py-2 transition-colors last:border-b-0 hover:bg-surface-warm"
           >
             <div className="flex min-w-0 items-center gap-2">
-              <span className="w-5 text-right text-xs tabular-nums text-neutral-400">{i + 1}</span>
+              <span className="w-5 text-right font-mono text-xs tabular-nums text-foil">{i + 1}</span>
               {p.player?.photo_url && (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
@@ -43,10 +42,10 @@ function Leaderboard({
               )}
               <div className="min-w-0">
                 <div className="truncate text-sm">{p.player?.name ?? p.player_id}</div>
-                <div className="truncate text-xs text-neutral-400">{p.team?.name}</div>
+                <div className="truncate text-xs text-muted">{p.team?.name}</div>
               </div>
             </div>
-            <span className="text-sm font-semibold tabular-nums">{format(value(p))}</span>
+            <span className="font-mono text-sm font-semibold tabular-nums text-ink">{format(value(p))}</span>
           </li>
         ))}
       </ol>
@@ -82,18 +81,19 @@ export default async function PlayersPage({ searchParams }: PageProps<"/players"
   const mostDribbles = top((p) => p.dribbles_succeeded ?? 0);
 
   return (
-    <div className="space-y-10">
-      <section>
-        <h1 className="mb-1 text-xl font-bold">Players</h1>
-        <p className="text-sm text-neutral-500">
-          Tournament leaderboards for {season}, from per-match player statistics.
-        </p>
+    <div className="space-y-12">
+      <section className="reveal">
+        <SectionHeading
+          eyebrow="Leaderboards"
+          title="Players"
+          standfirst={`Tournament leaderboards for ${season}, from per-match player statistics.`}
+        />
       </section>
 
       {stats.length === 0 ? (
-        <p className="text-sm text-neutral-500">No player data for {season} yet.</p>
+        <p className="text-sm text-muted">No player data for {season} yet.</p>
       ) : (
-        <div className="grid gap-8 md:grid-cols-3">
+        <div className="reveal grid gap-8 md:grid-cols-3" style={{ "--d": "80ms" } as React.CSSProperties}>
           <Leaderboard title="Top scorers" rows={topScorers} value={(p) => p.goals ?? 0} />
           <Leaderboard title="Top assists" rows={topAssists} value={(p) => p.assists ?? 0} />
           <Leaderboard

@@ -37,8 +37,8 @@ export default function MomentumChart({
   return (
     <div>
       <div className="mb-2 flex items-center gap-3">
-        <h3 className="text-xs uppercase tracking-wide text-neutral-500">{title}</h3>
-        <div className="flex items-center gap-3 text-xs text-neutral-500">
+        <h3 className="text-xs uppercase tracking-wide text-muted">{title}</h3>
+        <div className="flex items-center gap-3 text-xs text-muted">
           <span className="flex items-center gap-1">
             <span className="inline-block h-0.5 w-4 rounded-full" style={{ backgroundColor: homeColor }} />
             {homeName}

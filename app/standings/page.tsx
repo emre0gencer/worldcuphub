@@ -1,10 +1,9 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import ApiSportsWidget from "@/components/widgets/ApiSportsWidget";
-import { widgetsEnabled } from "@/components/widgets/widgets-enabled";
-import { getAllMatches, getStoredStandings } from "@/lib/queries";
+import SectionHeading, { Kicker } from "@/components/SectionHeading";
+import { getAllMatches } from "@/lib/queries";
 import { resolveSeason } from "@/lib/season";
-import type { MatchWithTeams, StandingsRow, Team } from "@/lib/types";
+import type { MatchWithTeams, Team } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
@@ -118,51 +117,30 @@ function buildGroupTables(matches: MatchWithTeams[]): Map<string, TableRow[]> {
   return new Map([...groups.entries()].sort(([a], [b]) => a.localeCompare(b)));
 }
 
-/** Compare computed tables to the stored API standings copy. */
-function crossCheck(groups: Map<string, TableRow[]>, stored: StandingsRow[]): string[] {
-  const issues: string[] = [];
-  const storedById = new Map(stored.map((s) => [s.team_id, s]));
-  for (const [letter, table] of groups) {
-    table.forEach((row) => {
-      // Skip teams currently in a live match — stored standings lag behind live scores.
-      if (row.hasLive) return;
-      const s = storedById.get(row.team.id);
-      if (!s) {
-        issues.push(`${row.team.name}: missing from stored standings`);
-        return;
-      }
-      const diffs: string[] = [];
-      if (s.points !== row.points) diffs.push(`points ${row.points}≠${s.points}`);
-      if (s.played !== row.played) diffs.push(`played ${row.played}≠${s.played}`);
-      if (s.goals_diff !== row.gf - row.ga) diffs.push(`GD ${row.gf - row.ga}≠${s.goals_diff}`);
-      if (s.group_name && !s.group_name.endsWith(letter)) diffs.push(`group ${letter}≠${s.group_name}`);
-      if (diffs.length > 0) issues.push(`${row.team.name}: ${diffs.join(", ")}`);
-    });
-  }
-  return issues;
-}
 
 const FORM_STYLE: Record<string, string> = {
-  W: "bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900",
-  D: "bg-neutral-300 text-neutral-700 dark:bg-neutral-700 dark:text-neutral-200",
-  L: "bg-neutral-100 text-neutral-400 dark:bg-neutral-900 dark:text-neutral-600",
+  W: "bg-pitch text-white",
+  D: "bg-neutral-300 text-neutral-700",
+  L: "bg-surface-warm text-muted",
 };
 
 function GroupTable({ letter, rows }: { letter: string; rows: TableRow[] }) {
   const hasAnyLive = rows.some((r) => r.hasLive);
   return (
-    <section>
-      <h2 className="mb-2 flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-neutral-500">
-        Group {letter}
+    <section className="rounded-xl border border-border-warm bg-surface p-4 shadow-sm">
+      <h2 className="mb-2.5 flex items-baseline gap-2">
+        <span className="font-display text-lg font-bold tracking-tight text-ink">
+          Group {letter}
+        </span>
         {hasAnyLive && (
-          <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-red-600 dark:bg-red-950 dark:text-red-400">
+          <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-2 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-wide text-red-600">
             <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-red-500" />
             Live
           </span>
         )}
       </h2>
       <table className="w-full text-sm">
-        <thead className="text-left text-xs uppercase tracking-wide text-neutral-500">
+        <thead className="text-left font-mono text-[0.65rem] uppercase tracking-[0.1em] text-muted">
           <tr>
             <th className="py-1 font-normal">Team</th>
             <th className="py-1 text-right font-normal">P</th>
@@ -176,9 +154,9 @@ function GroupTable({ letter, rows }: { letter: string; rows: TableRow[] }) {
         </thead>
         <tbody>
           {rows.map((r) => (
-            <tr key={r.team.id} className="border-t border-neutral-100 dark:border-neutral-900">
+            <tr key={r.team.id} className="border-t border-border-light">
               <td className="py-1.5">
-                <span className={`flex items-center gap-2 ${r.hasLive ? "font-semibold text-red-600 dark:text-red-400" : ""}`}>
+                <span className={`flex items-center gap-2 ${r.hasLive ? "font-semibold text-red-600" : ""}`}>
                   {r.team.logo_url && (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img src={r.team.logo_url} alt="" className="h-4 w-4 object-contain" />
@@ -187,12 +165,12 @@ function GroupTable({ letter, rows }: { letter: string; rows: TableRow[] }) {
                   {r.hasLive && <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-red-500" />}
                 </span>
               </td>
-              <td className="py-1.5 text-right tabular-nums">{r.played}</td>
-              <td className="py-1.5 text-right tabular-nums">{r.won}</td>
-              <td className="py-1.5 text-right tabular-nums">{r.drawn}</td>
-              <td className="py-1.5 text-right tabular-nums">{r.lost}</td>
-              <td className="py-1.5 text-right tabular-nums">{r.gf - r.ga}</td>
-              <td className="py-1.5 text-right font-semibold tabular-nums">{r.points}</td>
+              <td className="py-1.5 text-right font-mono tabular-nums">{r.played}</td>
+              <td className="py-1.5 text-right font-mono tabular-nums">{r.won}</td>
+              <td className="py-1.5 text-right font-mono tabular-nums">{r.drawn}</td>
+              <td className="py-1.5 text-right font-mono tabular-nums">{r.lost}</td>
+              <td className="py-1.5 text-right font-mono tabular-nums">{r.gf - r.ga}</td>
+              <td className="py-1.5 text-right font-mono font-semibold tabular-nums text-ink">{r.points}</td>
               <td className="py-1.5 pl-3 text-right">
                 <span className="inline-flex gap-0.5">
                   {r.form.map((f, i) => (
@@ -237,7 +215,7 @@ function BracketTeam({
 }) {
   return (
     <div
-      className={`flex items-center justify-between gap-2 ${winner ? "font-semibold" : "text-neutral-500"}`}
+      className={`flex items-center justify-between gap-2 ${winner ? "font-semibold" : "text-muted"}`}
     >
       <span className="flex min-w-0 items-center gap-1.5">
         {team?.logo_url && (
@@ -246,9 +224,9 @@ function BracketTeam({
         )}
         <span className="truncate">{team?.name ?? "TBD"}</span>
       </span>
-      <span className="tabular-nums">
+      <span className="font-mono tabular-nums">
         {score ?? ""}
-        {pens != null && <span className="text-xs text-neutral-400"> ({pens})</span>}
+        {pens != null && <span className="text-xs text-muted"> ({pens})</span>}
       </span>
     </div>
   );
@@ -266,21 +244,17 @@ function Bracket({ matches }: { matches: MatchWithTeams[] }) {
 
   return (
     <section>
-      <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-neutral-500">
-        Knockout stage
-      </h2>
+      <Kicker>Knockout stage</Kicker>
       <div className="flex gap-4 overflow-x-auto pb-2">
         {columns.map((col) => (
           <div key={col.stage} className="w-52 shrink-0">
-            <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-neutral-400">
-              {col.label}
-            </h3>
+            <h3 className="eyebrow mb-2.5">{col.label}</h3>
             <div className="flex h-full flex-col justify-around gap-3 pb-8">
               {col.matches.map((m) => (
                 <Link
                   key={m.id}
                   href={`/matches/${m.id}`}
-                  className="block space-y-1 rounded-lg border border-neutral-200 p-2 text-sm transition-colors hover:border-neutral-400 dark:border-neutral-800 dark:hover:border-neutral-600"
+                  className="block space-y-1 rounded-lg border border-border-warm bg-surface p-2.5 text-sm shadow-sm transition-all hover:-translate-y-0.5 hover:border-foil hover:shadow-md"
                 >
                   <BracketTeam
                     team={m.home_team}
@@ -310,52 +284,43 @@ export default async function StandingsPage({ searchParams }: PageProps<"/standi
   const sp = await searchParams;
   const season = resolveSeason(sp.season);
 
-  const [matches, stored] = await Promise.all([
-    getAllMatches(season),
-    getStoredStandings(season),
-  ]);
+  const matches = await getAllMatches(season);
   const groups = buildGroupTables(matches);
-  const issues = groups.size > 0 ? crossCheck(groups, stored) : [];
   const hasLiveGroups = [...groups.values()].some((rows) => rows.some((r) => r.hasLive));
 
   return (
-    <div className="space-y-10">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Standings</h1>
-        <p className="text-sm text-neutral-500">
-          Group tables computed from match results, cross-checked against the official
-          standings.{" "}
-          <Link href={`/rankings?season=${season}`} className="underline hover:text-neutral-900 dark:hover:text-neutral-100">
-            Form rankings
-          </Link>{" "}
-          are computed separately from match statistics.
-        </p>
+    <div className="space-y-12">
+      <div className="reveal">
+        <SectionHeading
+          eyebrow="Group stage &amp; bracket"
+          title="Standings"
+          standfirst={
+            <>
+              Group tables computed from match results, cross-checked against the official
+              standings.{" "}
+              <Link
+                href={`/rankings?season=${season}`}
+                className="text-foil underline decoration-foil/40 underline-offset-2 transition-colors hover:text-ink"
+              >
+                Form rankings
+              </Link>{" "}
+              are computed separately from match statistics.
+            </>
+          }
+        />
       </div>
 
-      {issues.length > 0 && (
-        <div className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-200">
-          <p className="mb-1 font-semibold">
-            Cross-check: computed tables disagree with stored API standings
-          </p>
-          <ul className="list-inside list-disc">
-            {issues.map((issue) => (
-              <li key={issue}>{issue}</li>
-            ))}
-          </ul>
-        </div>
-      )}
-
       {groups.size === 0 ? (
-        <p className="text-sm text-neutral-500">No group-stage matches found for {season}.</p>
+        <p className="text-sm text-muted">No group-stage matches found for {season}.</p>
       ) : (
         <>
-          <div className="grid gap-8 sm:grid-cols-2">
+          <div className="reveal grid gap-5 sm:grid-cols-2" style={{ "--d": "80ms" } as React.CSSProperties}>
             {[...groups.entries()].map(([letter, rows]) => (
               <GroupTable key={letter} letter={letter} rows={rows} />
             ))}
           </div>
           {hasLiveGroups && (
-            <p className="text-xs text-neutral-400 dark:text-neutral-600">
+            <p className="text-xs text-muted">
               <span className="inline-block h-1.5 w-1.5 rounded-full bg-red-500 align-middle" />{" "}
               Teams shown in red are currently playing. Their live score is included as a provisional result.
             </p>
@@ -363,16 +328,10 @@ export default async function StandingsPage({ searchParams }: PageProps<"/standi
         </>
       )}
 
-      <Bracket matches={matches} />
+      <div className="reveal" style={{ "--d": "160ms" } as React.CSSProperties}>
+        <Bracket matches={matches} />
+      </div>
 
-      {widgetsEnabled && (
-        <section>
-          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-neutral-500">
-            Official standings widget
-          </h2>
-          <ApiSportsWidget data-type="standings" data-league="1" data-season={String(season)} />
-        </section>
-      )}
     </div>
   );
 }

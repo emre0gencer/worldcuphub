@@ -1,16 +1,26 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { Geist, Geist_Mono } from "next/font/google";
-import ApiSportsConfig from "@/components/widgets/ApiSportsConfig";
+import { Fraunces, Hanken_Grotesk, Geist_Mono } from "next/font/google";
+import InteractiveGradientBg from "@/components/InteractiveGradientBg";
 import SeasonSwitcher from "@/components/SeasonSwitcher";
 import HomeLink from "@/components/HomeLink";
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+// Editorial display serif — headings, wordmark, headline accents.
+const fraunces = Fraunces({
+  variable: "--font-fraunces",
+  subsets: ["latin"],
+  weight: ["400", "500", "600", "700", "900"],
+  style: ["normal", "italic"],
+});
+
+// Warm grotesque — body & UI.
+const hankenGrotesk = Hanken_Grotesk({
+  variable: "--font-hanken",
   subsets: ["latin"],
 });
 
+// Tabular mono — scores, Elo, all numeric data.
 const geistMono = Geist_Mono({
   variable: "--font-geist-mono",
   subsets: ["latin"],
@@ -29,36 +39,51 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      className={`${fraunces.variable} ${hankenGrotesk.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col font-sans">
-        <header className="border-b border-neutral-200 dark:border-neutral-800">
-          <nav className="mx-auto flex max-w-5xl items-center gap-6 px-4 py-4">
-            <HomeLink className="text-lg font-bold tracking-tight">
-              World Cup <span className="text-neutral-400">HUB</span>
+        <InteractiveGradientBg />
+        {/* Foil hairline */}
+        <div className="h-[3px] bg-gradient-to-r from-transparent via-[#d8b56a] to-transparent" />
+        <header className="sticky top-0 z-50 border-b border-border-warm bg-paper/70 backdrop-blur-md">
+          <nav className="mx-auto flex max-w-5xl items-center gap-6 px-4 py-3.5">
+            <HomeLink className="group flex items-baseline gap-2">
+              <span className="font-display text-[1.35rem] font-black leading-none tracking-tight text-ink">
+                World&nbsp;Cup
+              </span>
+              <span className="font-display foil-text text-[1.35rem] font-black italic leading-none tracking-tight">
+                HUB
+              </span>
+              <span className="ml-0.5 hidden font-mono text-[0.6rem] tracking-[0.2em] text-foil sm:inline">
+                &rsquo;26
+              </span>
             </HomeLink>
-            <div className="flex gap-4 text-sm text-neutral-500">
-              <HomeLink className="hover:text-neutral-900 dark:hover:text-neutral-100">
+            <div className="flex items-center gap-5 text-[0.8rem] font-medium text-muted">
+              <HomeLink className="relative transition-colors hover:text-ink">
                 Matches
               </HomeLink>
-              <Link href="/standings" className="hover:text-neutral-900 dark:hover:text-neutral-100">
+              <Link href="/standings" className="transition-colors hover:text-ink">
                 Standings
               </Link>
-              <Link href="/players" className="hover:text-neutral-900 dark:hover:text-neutral-100">
+              <Link href="/players" className="transition-colors hover:text-ink">
                 Players
               </Link>
-              <Link href="/rankings" className="hover:text-neutral-900 dark:hover:text-neutral-100">
+              <Link href="/rankings" className="transition-colors hover:text-ink">
                 Rankings
               </Link>
             </div>
             <SeasonSwitcher />
           </nav>
         </header>
-        <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-8">{children}</main>
-        <footer className="border-t border-neutral-200 px-4 py-6 text-center text-xs text-neutral-400 dark:border-neutral-800">
-          World Cup HUB — read-only stats &amp; analytics. Data: API-Football.
+        <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-10">{children}</main>
+        <footer className="mt-8 border-t border-border-warm bg-surface-warm/70 backdrop-blur-sm px-4 py-7 text-center">
+          <p className="font-mono text-[0.65rem] uppercase tracking-[0.18em] text-foil">
+            World Cup HUB
+          </p>
+          <p className="mt-1.5 text-xs text-muted">
+            Read-only stats &amp; analytics &middot; Data: API-Football
+          </p>
         </footer>
-        <ApiSportsConfig />
       </body>
     </html>
   );
