@@ -78,15 +78,21 @@ export default function MatchTimeline({
 
   const hasToday = days.some((d) => d.key === todayKey);
 
-  // On every mount — including navigating back from another page — start at the
-  // top and then *animate* a smooth scroll down to today, so the scroll effect
-  // is visible rather than an instant jump. Past results sit above (scroll up),
-  // upcoming fixtures below (scroll down). The double rAF defers past Next.js's
-  // own scroll-to-top so we begin cleanly from the top.
+  // A completed tournament (e.g. the 2022 archive) has no match today or in the
+  // future. There's no meaningful "today" there, so we drop the Today marker and
+  // the scroll-to-today entirely and simply start at the beginning (the earliest
+  // matchday, top of the list).
+  const isArchived = days.length > 0 && !days.some((d) => d.key >= todayKey);
+
+  // For a live tournament: on every mount — including navigating back from
+  // another page — start at the top and then *animate* a smooth scroll down to
+  // today, so the scroll effect is visible rather than an instant jump. Past
+  // results sit above (scroll up), upcoming fixtures below (scroll down). The
+  // double rAF defers past Next.js's own scroll-to-top so we begin cleanly.
   const anchorRef = useRef<HTMLElement>(null);
   const scrolled = useRef(false);
   useEffect(() => {
-    if (scrolled.current) return;
+    if (isArchived || scrolled.current) return;
     const anchor = anchorRef.current;
     if (!anchor) return;
     scrolled.current = true;
@@ -97,12 +103,12 @@ export default function MatchTimeline({
         setTimeout(() => anchor.scrollIntoView({ block: "start", behavior: "smooth" }), 300);
       }),
     );
-  }, [days.length]);
+  }, [days.length, isArchived]);
 
   const rows: React.ReactNode[] = [];
   let markerPlaced = false;
   for (const d of days) {
-    if (!hasToday && !markerPlaced && d.key > todayKey) {
+    if (!isArchived && !hasToday && !markerPlaced && d.key > todayKey) {
       rows.push(<TodayMarker key="today-marker" date={fullDate(todayKey)} anchorRef={anchorRef} />);
       markerPlaced = true;
     }
@@ -122,8 +128,9 @@ export default function MatchTimeline({
       />,
     );
   }
-  // All fixtures already played → anchor the present at the very bottom.
-  if (!hasToday && !markerPlaced) {
+  // Live tournament with a gap (no fixtures today, but more to come) → anchor the
+  // present between past and upcoming. Archived tournaments get no marker.
+  if (!isArchived && !hasToday && !markerPlaced) {
     rows.push(<TodayMarker key="today-marker" date={fullDate(todayKey)} anchorRef={anchorRef} />);
   }
 

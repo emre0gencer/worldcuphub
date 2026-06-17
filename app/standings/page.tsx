@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import SectionHeading, { Kicker } from "@/components/SectionHeading";
 import { getAllMatches } from "@/lib/queries";
-import { resolveSeason } from "@/lib/season";
+import { getActiveSeason } from "@/lib/season-server";
 import type { MatchWithTeams, Team } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -280,9 +280,8 @@ function Bracket({ matches }: { matches: MatchWithTeams[] }) {
 
 // ── page ─────────────────────────────────────────────────────────────────────
 
-export default async function StandingsPage({ searchParams }: PageProps<"/standings">) {
-  const sp = await searchParams;
-  const season = resolveSeason(sp.season);
+export default async function StandingsPage() {
+  const season = await getActiveSeason();
 
   const matches = await getAllMatches(season);
   const groups = buildGroupTables(matches);
@@ -299,7 +298,7 @@ export default async function StandingsPage({ searchParams }: PageProps<"/standi
               Group tables computed from match results, cross-checked against the official
               standings.{" "}
               <Link
-                href={`/rankings?season=${season}`}
+                href="/rankings"
                 className="text-foil underline decoration-foil/40 underline-offset-2 transition-colors hover:text-ink"
               >
                 Form rankings

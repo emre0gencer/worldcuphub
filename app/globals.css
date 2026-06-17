@@ -60,21 +60,6 @@ body::after {
   font-optical-sizing: auto;
 }
 
-/* Foil-stamped text — for the wordmark and headline accents */
-.foil-text {
-  background-image: linear-gradient(
-    100deg,
-    #9a722f 0%,
-    #d8b56a 38%,
-    #f3e2b4 50%,
-    #d8b56a 62%,
-    #9a722f 100%
-  );
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-}
-
 /* Small uppercase index / eyebrow above section titles */
 .eyebrow {
   font-family: var(--font-mono);

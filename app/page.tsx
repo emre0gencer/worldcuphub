@@ -1,13 +1,12 @@
 import MatchTimeline from "@/components/MatchTimeline";
 import { getAllMatches, getLatestSnapshotMinute, getTeamSeasons } from "@/lib/queries";
-import { resolveSeason } from "@/lib/season";
+import { getActiveSeason } from "@/lib/season-server";
 
 // Live scores must always be fresh — render per request.
 export const dynamic = "force-dynamic";
 
-export default async function HomePage({ searchParams }: PageProps<"/">) {
-  const sp = await searchParams;
-  const season = resolveSeason(sp.season);
+export default async function HomePage() {
+  const season = await getActiveSeason();
   const [matches, teamSeasons] = await Promise.all([
     getAllMatches(season),
     getTeamSeasons(season),

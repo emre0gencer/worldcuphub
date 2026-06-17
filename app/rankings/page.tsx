@@ -10,7 +10,7 @@ import {
   getLatestPredictions,
   getTeamSeasons,
 } from "@/lib/queries";
-import { resolveSeason } from "@/lib/season";
+import { getActiveSeason } from "@/lib/season-server";
 import type { Team, TeamForm, TeamSeason } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -63,9 +63,8 @@ function RankingTable({
   );
 }
 
-export default async function RankingsPage({ searchParams }: PageProps<"/rankings">) {
-  const sp = await searchParams;
-  const season = resolveSeason(sp.season);
+export default async function RankingsPage() {
+  const season = await getActiveSeason();
   const [latestForm, matches, predictions, allTeamSeasons] = await Promise.all([
     getLatestForm(season),
     getAllMatches(season),

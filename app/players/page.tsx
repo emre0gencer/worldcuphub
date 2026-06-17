@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import SectionHeading from "@/components/SectionHeading";
 import { getPlayerSeasonStats } from "@/lib/queries";
-import { resolveSeason } from "@/lib/season";
+import { getActiveSeason } from "@/lib/season-server";
 import type { PlayerSeasonStats } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -53,9 +53,8 @@ function Leaderboard({
   );
 }
 
-export default async function PlayersPage({ searchParams }: PageProps<"/players">) {
-  const sp = await searchParams;
-  const season = resolveSeason(sp.season);
+export default async function PlayersPage() {
+  const season = await getActiveSeason();
   const stats = await getPlayerSeasonStats(season);
 
   const top = (value: (p: PlayerSeasonStats) => number, filter?: (p: PlayerSeasonStats) => boolean) =>

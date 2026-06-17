@@ -3,7 +3,9 @@ import Link from "next/link";
 import { Fraunces, Hanken_Grotesk, Geist_Mono } from "next/font/google";
 import InteractiveGradientBg from "@/components/InteractiveGradientBg";
 import SeasonSwitcher from "@/components/SeasonSwitcher";
+import SiteMasthead from "@/components/SiteMasthead";
 import HomeLink from "@/components/HomeLink";
+import { getActiveSeason } from "@/lib/season-server";
 import "./globals.css";
 
 // Editorial display serif — headings, wordmark, headline accents.
@@ -31,11 +33,14 @@ export const metadata: Metadata = {
   description: "Matches, stats, form and predictions for the 2026 FIFA World Cup",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  // Single source of truth for the season — passed to the switcher so its
+  // highlight always matches the page content (both read the same cookie).
+  const activeSeason = await getActiveSeason();
   return (
     <html
       lang="en"
@@ -51,11 +56,8 @@ export default function RootLayout({
               <span className="font-display text-[1.35rem] font-black leading-none tracking-tight text-ink">
                 World&nbsp;Cup
               </span>
-              <span className="font-display foil-text text-[1.35rem] font-black italic leading-none tracking-tight">
+              <span className="font-mono text-base font-bold uppercase tracking-[0.18em] text-foil sm:text-lg">
                 HUB
-              </span>
-              <span className="ml-0.5 hidden font-mono text-[0.6rem] tracking-[0.2em] text-foil sm:inline">
-                &rsquo;26
               </span>
             </HomeLink>
             <div className="flex items-center gap-5 text-[0.8rem] font-medium text-muted">
@@ -72,9 +74,10 @@ export default function RootLayout({
                 Rankings
               </Link>
             </div>
-            <SeasonSwitcher />
+            <SeasonSwitcher current={activeSeason} />
           </nav>
         </header>
+        <SiteMasthead season={activeSeason} />
         <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-10">{children}</main>
         <footer className="mt-8 border-t border-border-warm bg-surface-warm/70 backdrop-blur-sm px-4 py-7 text-center">
           <p className="font-mono text-[0.65rem] uppercase tracking-[0.18em] text-foil">
