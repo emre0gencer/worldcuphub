@@ -4,6 +4,9 @@ import EloDelta from "@/components/EloDelta";
 import { getTeamColors } from "@/lib/team-colors";
 import MomentumChart, { type MomentumPoint } from "@/components/MomentumChart";
 import StatBar from "@/components/StatBar";
+import { MatchEventIcon, SubArrow } from "@/components/MatchEventIcon";
+import { LineupPitch } from "@/components/LineupPitch";
+import { RatingBadge } from "@/components/RatingBadge";
 import {
   getFormForTeams,
   getLatestPrediction,
@@ -20,8 +23,6 @@ import {
 } from "@/lib/queries";
 import type {
   MatchEvent,
-  MatchLineup,
-  MatchLineupPlayer,
   MatchWithTeams,
   Team,
   TeamSeason,
@@ -422,17 +423,46 @@ async function LiveView({ match }: { match: MatchWithTeams }) {
 
 // ── finished: events timeline ────────────────────────────────────────────────
 
-function eventIcon(e: MatchEvent): string {
-  if (e.type === "Goal") {
-    if (e.detail === "Own Goal") return "⊖ OG";
-    if (e.detail === "Penalty") return "⚽ (pen)";
-    if (e.detail === "Missed Penalty") return "⊘ pen miss";
-    return "⚽";
+/** The descriptive content of one event, sans icon. For a substitution the
+ *  player coming ON (API `assist`) is highlighted and the player going OFF
+ *  (API `player`) is muted — the reverse of the raw field naming. */
+function EventBody({ e }: { e: MatchEvent }) {
+  if (e.type === "subst") {
+    return (
+      <span className="inline-flex flex-col leading-tight">
+        <span className="flex items-center gap-1 font-semibold text-ink">
+          <SubArrow direction="in" />
+          {e.assist_name ?? "—"}
+        </span>
+        {e.player_name && (
+          <span className="flex items-center gap-1 text-xs text-muted">
+            <SubArrow direction="out" />
+            {e.player_name}
+          </span>
+        )}
+      </span>
+    );
   }
-  if (e.type === "Card") return e.detail === "Red Card" ? "🟥" : "🟨";
-  if (e.type === "subst") return "⇄";
-  if (e.type === "Var") return "VAR";
-  return e.type ?? "";
+  if (e.type === "Goal") {
+    return (
+      <span className="inline-flex flex-col leading-tight">
+        <span className="font-semibold text-ink">{e.player_name}</span>
+        {e.assist_name && <span className="text-xs text-muted">assist · {e.assist_name}</span>}
+        {(e.detail === "Own Goal" || e.detail === "Missed Penalty") && (
+          <span className="text-xs text-muted">{e.detail === "Own Goal" ? "own goal" : "penalty missed"}</span>
+        )}
+      </span>
+    );
+  }
+  if (e.type === "Var") {
+    return (
+      <span className="inline-flex flex-col leading-tight">
+        <span className="font-medium text-ink">{e.detail}</span>
+        {e.player_name && <span className="text-xs text-muted">{e.player_name}</span>}
+      </span>
+    );
+  }
+  return <span className="font-medium text-ink">{e.player_name}</span>;
 }
 
 function EventsTimeline({ events, match }: { events: MatchEvent[]; match: MatchWithTeams }) {
@@ -443,24 +473,24 @@ function EventsTimeline({ events, match }: { events: MatchEvent[]; match: MatchW
     const isHome = e.team_id === match.home_team_id;
     const minute =
       e.elapsed != null ? `${e.elapsed}${e.elapsed_extra ? `+${e.elapsed_extra}` : ""}′` : "";
-    const text = (
-      <span>
-        <span className="mr-1">{eventIcon(e)}</span>
-        <span className="font-medium">{e.player_name}</span>
-        {e.type === "subst" && e.assist_name && (
-          <span className="text-muted"> ⟶ {e.assist_name}</span>
-        )}
-        {e.type === "Goal" && e.assist_name && (
-          <span className="text-muted"> (assist: {e.assist_name})</span>
-        )}
-        {e.type === "Var" && <span className="text-muted"> — {e.detail}</span>}
+    const content = (
+      <span className={`flex items-center gap-2 ${isHome ? "flex-row-reverse text-right" : ""}`}>
+        <MatchEventIcon event={e} />
+        <EventBody e={e} />
       </span>
     );
     return (
-      <li key={e.id} className="grid grid-cols-[1fr_3.5rem_1fr] items-center gap-2 py-1 text-sm">
-        <span className="text-right">{isHome ? text : null}</span>
-        <span className="text-center text-xs tabular-nums text-muted">{minute}</span>
-        <span>{!isHome ? text : null}</span>
+      <li
+        key={e.id}
+        className="relative grid grid-cols-[1fr_3rem_1fr] items-center gap-2 py-1.5 text-sm"
+      >
+        <span className="flex justify-end">{isHome ? content : null}</span>
+        <span className="flex justify-center">
+          <span className="rounded-full bg-surface-warm px-1.5 py-0.5 text-center font-mono text-[0.7rem] tabular-nums text-muted">
+            {minute}
+          </span>
+        </span>
+        <span className="flex justify-start">{!isHome ? content : null}</span>
       </li>
     );
   };
@@ -470,7 +500,8 @@ function EventsTimeline({ events, match }: { events: MatchEvent[]; match: MatchW
       <h2 className="mb-2 eyebrow">
         Timeline
       </h2>
-      <ul className="rounded-xl border border-border-warm bg-surface px-4 py-2">
+      {/* center spine */}
+      <ul className="relative rounded-xl border border-border-warm bg-surface px-4 py-2 before:absolute before:inset-y-3 before:left-1/2 before:w-px before:-translate-x-1/2 before:bg-border-warm">
         {regular.map(row)}
       </ul>
       {shootout.length > 0 && (
@@ -482,57 +513,6 @@ function EventsTimeline({ events, match }: { events: MatchEvent[]; match: MatchW
         </>
       )}
     </section>
-  );
-}
-
-// ── finished: lineups ────────────────────────────────────────────────────────
-
-function LineupColumn({
-  team,
-  lineup,
-  players,
-}: {
-  team: Team;
-  lineup: MatchLineup | undefined;
-  players: MatchLineupPlayer[];
-}) {
-  const starters = players.filter((p) => p.starter);
-  const subs = players.filter((p) => !p.starter);
-  return (
-    <div>
-      <h3 className="mb-1 font-display text-base font-bold tracking-tight">
-        {team.name}
-        {lineup?.formation && (
-          <span className="ml-2 font-mono text-xs font-normal text-muted">{lineup.formation}</span>
-        )}
-      </h3>
-      {lineup?.coach_name && (
-        <p className="mb-2 text-xs text-muted">Coach: {lineup.coach_name}</p>
-      )}
-      <ul className="space-y-0.5 text-sm">
-        {starters.map((p) => (
-          <li key={p.id} className="flex gap-2">
-            <span className="w-6 text-right tabular-nums text-muted">{p.shirt_number}</span>
-            <span className="w-4 text-xs leading-5 text-muted">{p.position}</span>
-            <span>{p.player_name}</span>
-          </li>
-        ))}
-      </ul>
-      {subs.length > 0 && (
-        <>
-          <p className="mt-3 mb-1 text-xs uppercase tracking-wide text-muted">Substitutes</p>
-          <ul className="space-y-0.5 text-sm text-muted">
-            {subs.map((p) => (
-              <li key={p.id} className="flex gap-2">
-                <span className="w-6 text-right tabular-nums text-muted">{p.shirt_number}</span>
-                <span className="w-4 text-xs leading-5 text-muted">{p.position}</span>
-                <span>{p.player_name}</span>
-              </li>
-            ))}
-          </ul>
-        </>
-      )}
-    </div>
   );
 }
 
@@ -645,16 +625,16 @@ async function FinishedView({ match }: { match: MatchWithTeams }) {
           <h2 className="mb-2 eyebrow">
             Lineups
           </h2>
-          <div className="grid gap-6 sm:grid-cols-2">
-            {[home, away].map((team) => (
-              <LineupColumn
-                key={team.id}
-                team={team}
-                lineup={lineups.teams.find((l) => l.team_id === team.id)}
-                players={lineups.players.filter((p) => p.team_id === team.id)}
-              />
-            ))}
-          </div>
+          <LineupPitch
+            home={home}
+            away={away}
+            homeLineup={lineups.teams.find((l) => l.team_id === home.id)}
+            awayLineup={lineups.teams.find((l) => l.team_id === away.id)}
+            homePlayers={lineups.players.filter((p) => p.team_id === home.id)}
+            awayPlayers={lineups.players.filter((p) => p.team_id === away.id)}
+            homeColor={homeColor}
+            awayColor={awayColor}
+          />
         </section>
       )}
 
@@ -687,8 +667,8 @@ async function FinishedView({ match }: { match: MatchWithTeams }) {
                           <td className="py-1 text-right font-mono tabular-nums">{p.minutes}</td>
                           <td className="py-1 text-right font-mono tabular-nums">{p.goals || ""}</td>
                           <td className="py-1 text-right font-mono tabular-nums">{p.assists || ""}</td>
-                          <td className="py-1 text-right font-mono font-semibold tabular-nums text-ink">
-                            {p.rating?.toFixed(1) ?? "–"}
+                          <td className="py-1 text-right">
+                            <RatingBadge rating={p.rating} />
                           </td>
                         </tr>
                       ))}

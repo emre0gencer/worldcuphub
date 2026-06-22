@@ -98,6 +98,10 @@ const COLORS: Record<string, TeamColors> = {
   SYR: { main: "#007A3D", secondary: "#CE1126" },   // green / red
   HAI: { main: "#00209F", secondary: "#D21034" },   // blue / red
   NZL: { main: "#2C2C2C", secondary: "#808080" },   // near-black / grey (All Blacks)
+  // ── API-Football country_code variants (DB uses these, not the ISO codes
+  //    above) — duplicated so both spellings resolve across seasons ──────────
+  CGO: { main: "#C8102E", secondary: "#0085CA" },   // Congo DR (Leopards) red / sky blue — alias of COD
+  CUR: { main: "#003DA5", secondary: "#F9C000" },   // Curaçao blue / yellow — alias of CUW
 };
 
 export function getTeamColors(countryCode: string | null | undefined): TeamColors {
