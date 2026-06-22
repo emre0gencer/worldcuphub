@@ -15,6 +15,7 @@ import {
   getMatchEvents,
   getMatchLineups,
   getPlayerMatchStats,
+  getReconstructedMomentum,
   getPriorMeetings,
   getSnapshotSeries,
   getTeamMatchStats,
@@ -343,6 +344,16 @@ const MOMENTUM_CHARTS: {
   { title: "Passes",          type: "Total passes" },
 ];
 
+// ESPN-reconstructed momentum metrics (migration 0005), in display order. Only
+// metrics ESPN reports as discrete timestamped events are available here — no
+// xG or passes (those would be estimation, so they are intentionally omitted).
+const RECON_CHARTS: { metric: string; title: string }[] = [
+  { metric: "total_shots",     title: "Shots" },
+  { metric: "shots_on_target", title: "Shots on target" },
+  { metric: "corners",         title: "Corners" },
+  { metric: "fouls",           title: "Fouls" },
+];
+
 async function LiveView({ match }: { match: MatchWithTeams }) {
   const home = match.home_team!;
   const away = match.away_team!;
@@ -524,12 +535,13 @@ async function FinishedView({ match }: { match: MatchWithTeams }) {
   const homeColor = getTeamColors(home.country_code).main;
   const awayColor = getTeamColors(away.country_code).secondary;
 
-  const [teamStats, playerStats, events, lineups, snapshots] = await Promise.all([
+  const [teamStats, playerStats, events, lineups, snapshots, reconstructed] = await Promise.all([
     getTeamMatchStats(match.id),
     getPlayerMatchStats(match.id),
     getMatchEvents(match.id),
     getMatchLineups(match.id),
     getSnapshotSeries(match.id),
+    getReconstructedMomentum(match.id),
   ]);
   const hs = teamStats.find((s) => s.team_id === home.id);
   const as = teamStats.find((s) => s.team_id === away.id);
@@ -568,16 +580,47 @@ async function FinishedView({ match }: { match: MatchWithTeams }) {
         </section>
       )}
 
-      {/* Momentum charts — only available for live-ingested matches */}
+      {/* Momentum charts — from live snapshots, or reconstructed from ESPN
+          commentary (real per-minute events) for matches never live-ingested. */}
       {(() => {
         if (snapshots.length === 0) {
+          // Fallback: ESPN-reconstructed series (shots / on-target / corners / fouls).
+          const recon = RECON_CHARTS
+            .map((c) => ({ ...c, points: reconstructed.find((r) => r.metric === c.metric)?.points }))
+            .filter((c): c is typeof c & { points: NonNullable<typeof c.points> } => !!c.points?.length);
+          if (recon.length === 0) {
+            return (
+              <section>
+                <h2 className="mb-2 eyebrow">Momentum</h2>
+                <div className="rounded-xl border border-border-warm bg-surface px-4 py-5 text-center text-sm text-muted">
+                  Momentum charts are not available for this match — it was not live-ingested.
+                </div>
+              </section>
+            );
+          }
           return (
             <section>
-              <h2 className="mb-2 eyebrow">
-                Momentum
-              </h2>
-              <div className="rounded-xl border border-border-warm bg-surface px-4 py-5 text-center text-sm text-muted">
-                Momentum charts are not available for this match — it was not live-ingested.
+              <h2 className="mb-1 eyebrow">Momentum</h2>
+              <p className="mb-3 text-xs text-muted">
+                Reconstructed from ESPN match commentary — this match was not live-ingested.
+              </p>
+              <div className="flex snap-x snap-mandatory gap-4 overflow-x-auto pb-3">
+                {recon.map((c) => (
+                  <div
+                    key={c.metric}
+                    className="w-[calc(100%-2rem)] shrink-0 snap-start rounded-xl border border-border-warm bg-surface p-4 sm:w-80"
+                  >
+                    <MomentumChart
+                      title={c.title}
+                      data={c.points}
+                      homeName={home.name}
+                      awayName={away.name}
+                      homeColor={homeColor}
+                      awayColor={awayColor}
+                      curveType="stepAfter"
+                    />
+                  </div>
+                ))}
               </div>
             </section>
           );

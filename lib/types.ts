@@ -84,6 +84,18 @@ export interface MatchSnapshot {
   payload: SnapshotPayload;
 }
 
+// Reconstructed momentum (migration 0005) — REAL per-team, per-minute cumulative
+// series rebuilt from ESPN match commentary for matches that were never
+// live-ingested (no match_snapshots). Used by the frontend only as a fallback.
+export interface MatchMomentum {
+  match_id: number;
+  season: number;
+  metric: string; // total_shots | shots_on_target | corners | fouls
+  source: string; // 'espn-commentary'
+  points: { minute: number; home: number; away: number }[];
+  generated_at: string;
+}
+
 // Track 2 — immutable finalized stats
 export interface TeamMatchStats {
   id: number;

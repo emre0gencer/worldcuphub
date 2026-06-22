@@ -4,6 +4,7 @@ import type {
   MatchEvent,
   MatchLineup,
   MatchLineupPlayer,
+  MatchMomentum,
   MatchSnapshot,
   MatchWithTeams,
   Player,
@@ -71,6 +72,17 @@ export async function getSnapshotSeries(matchId: number): Promise<MatchSnapshot[
     .order("captured_at", { ascending: true });
   if (error) throw error;
   return data as MatchSnapshot[];
+}
+
+/** Reconstructed momentum (ESPN-derived) for matches that were never live-ingested.
+ *  Returned only as a fallback when getSnapshotSeries is empty. */
+export async function getReconstructedMomentum(matchId: number): Promise<MatchMomentum[]> {
+  const { data, error } = await getSupabase()
+    .from("match_momentum")
+    .select("*")
+    .eq("match_id", matchId);
+  if (error) throw error;
+  return data as MatchMomentum[];
 }
 
 /** Just the latest live clock (elapsed minute) for the scoreboard — avoids
