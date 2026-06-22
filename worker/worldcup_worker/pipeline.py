@@ -62,13 +62,22 @@ def upsert_matches(
 
 
 def upsert_players(sb, api: ApiFootballClient, season: int) -> int:
-    """Paginated /players → global profiles + stored season-stat copies."""
-    profiles, season_stats = [], []
+    """Paginated /players → global profiles + stored season-stat copies.
+
+    Deduped by primary key before upsert: the API can list the same player id
+    on more than one page (e.g. a mid-tournament squad change), and Postgres
+    rejects an ON CONFLICT batch that touches the same row twice. Last entry
+    wins, matching upsert-overwrite semantics."""
+    profiles_by_id: dict[int, dict[str, Any]] = {}
+    season_stats_by_key: dict[tuple[int, int], dict[str, Any]] = {}
     for entry in api.players(season):
-        profiles.append(parse_player_profile(entry))
+        profile = parse_player_profile(entry)
+        profiles_by_id[profile["id"]] = profile
         stats = parse_player_season_stats(entry, season)
         if stats:
-            season_stats.append(stats)
+            season_stats_by_key[(stats["player_id"], stats["season"])] = stats
+    profiles = list(profiles_by_id.values())
+    season_stats = list(season_stats_by_key.values())
     if profiles:
         sb.table("players").upsert(profiles).execute()
     if season_stats:

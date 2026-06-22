@@ -204,16 +204,26 @@ def run() -> None:
         else:
             # Smart idle: sleep until 10 minutes before the next kickoff so we
             # don't burn discovery quota during long gaps between matches.
-            secs = seconds_until_next_kickoff(SEASON)
+            # Guarded: a transient DB error here must not kill the loop — fall
+            # back to a normal discovery interval and try again next cycle.
+            try:
+                secs = seconds_until_next_kickoff(SEASON)
+            except Exception:
+                log.exception("next-kickoff lookup failed; using discovery interval")
+                secs = None
             if secs is not None and secs > config.FIXTURE_DISCOVERY_INTERVAL:
                 # Wake up 10 min before kickoff, but never sleep longer than 30 min
-                # so we stay responsive to manual match rescheduling.
-                sleep_for = min(secs - 600, 1800)
+                # so we stay responsive to manual match rescheduling, and never
+                # less than one discovery interval — when kickoff is 300–600s away
+                # secs - 600 goes negative, which time.sleep() rejects.
+                sleep_for = max(min(secs - 600, 1800), config.FIXTURE_DISCOVERY_INTERVAL)
                 log.info("next kickoff in %.0fs — sleeping %.0fs", secs, sleep_for)
             else:
                 sleep_for = config.FIXTURE_DISCOVERY_INTERVAL
 
-        time.sleep(sleep_for)
+        # Defensive floor: time.sleep() rejects negatives, so no code path above
+        # may ever hand it one. This guarantees the loop sleeps and continues.
+        time.sleep(max(sleep_for, 1))
 
 
 if __name__ == "__main__":
