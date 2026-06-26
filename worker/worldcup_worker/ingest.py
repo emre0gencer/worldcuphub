@@ -134,6 +134,43 @@ def finalize_match(api: ApiFootballClient, match_id: int) -> None:
     log.info("finalized match %s", match_id)
 
 
+def reconcile_stale_live(api: ApiFootballClient, statuses: dict[int, str]) -> None:
+    """Reconcile matches pinned to a live status in the DB but no longer live
+    per the API.
+
+    `status_short` (the source of truth for the generated `status` column) is
+    only ever advanced while a match sits in `tracked_live`. If the worker never
+    witnessed the live→finished transition — an outage spanning the whole match,
+    or an ESPN-backfilled "missed game" finalized out-of-band with a live
+    status_short — the row stays 'live' forever. `find_unfinalized_match_ids`
+    can't rescue it because that only scans status == 'finished'. This is the
+    general backstop: trust the API's current status for anything the DB still
+    thinks is live.
+    """
+    sb = db.client()
+    stuck = (
+        sb.table("matches")
+        .select("id")
+        .eq("season", SEASON)
+        .eq("status", "live")
+        .execute()
+    )
+    for row in stuck.data or []:
+        mid = row["id"]
+        true_status = statuses.get(mid)
+        if true_status in (None, "live"):
+            continue  # genuinely live (or unknown to the API) — leave it alone
+        if true_status == "finished":
+            log.warning("reconciling stale-live match %s → finished", mid)
+            finalize_match(api, mid)  # idempotent; corrects status_short to FT/AET/PEN
+        else:
+            # Reverted to scheduled (postponement, etc.) — just refresh the row.
+            log.warning("reconciling stale-live match %s → %s", mid, true_status)
+            fixtures = api.fixtures_by_ids([mid])
+            if fixtures:
+                _update_match_row(sb, fixtures[0])
+
+
 def find_unfinalized_match_ids(season: int) -> list[int]:
     """Return IDs of finished matches (per DB) that have no team_match_stats yet.
 
@@ -180,6 +217,10 @@ def run() -> None:
                         if statuses.get(finished_id) == "finished":
                             finalize_match(api, finished_id)
                     tracked_live = live_ids
+                    # Backstop: rescue any match the DB still thinks is live but
+                    # the API no longer does (outage across the whole match, or an
+                    # out-of-band ESPN backfill that left a live status_short).
+                    reconcile_stale_live(api, statuses)
                     # Catch-up: finalize any finished match that slipped through
                     # (e.g. worker was restarted while a match was live — tracked_live
                     # starts empty so the transition is never witnessed directly).
