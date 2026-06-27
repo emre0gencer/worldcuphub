@@ -8,9 +8,13 @@ import type {
   MatchSnapshot,
   MatchWithTeams,
   Player,
+  PlayerMatchLogEntry,
   PlayerMatchStats,
+  PlayerProfile,
+  PlayerProfileTotals,
   PlayerSeasonStats,
   Prediction,
+  Stage,
   SnapshotStatEntry,
   StandingsRow,
   Team,
@@ -427,6 +431,193 @@ export async function getFormForTeams(
     if (!latest.has(row.team_id)) latest.set(row.team_id, row);
   }
   return latest;
+}
+
+// Shape of one player_match_stats row with its match (+ both teams) embedded.
+type PlayerMatchStatsWithMatch = PlayerMatchStats & {
+  match: {
+    id: number;
+    kickoff_at: string;
+    stage: Stage;
+    group_letter: string | null;
+    status_short: string;
+    home_team_id: number | null;
+    away_team_id: number | null;
+    home_score: number | null;
+    away_score: number | null;
+    home_team: Team | null;
+    away_team: Team | null;
+  } | null;
+};
+
+const PLAYER_PROFILE_SELECT = `
+  *,
+  match:matches (
+    id, kickoff_at, stage, group_letter, status_short,
+    home_team_id, away_team_id, home_score, away_score,
+    home_team:teams!matches_home_team_id_fkey (*),
+    away_team:teams!matches_away_team_id_fkey (*)
+  )
+`;
+
+const sum = (xs: (number | null | undefined)[]) =>
+  xs.reduce<number>((t, x) => t + (x ?? 0), 0);
+
+/**
+ * Everything the app tracks about one player's run in a given tournament,
+ * assembled for the PlayerWindow modal: the profile, their team, a per-match
+ * log (with opponents + result) and season aggregates. Reads the immutable
+ * per-match table (`player_match_stats`) so it always reflects every finished
+ * match — the same reason the leaderboards avoid `player_season_stats`.
+ * Safe to call from the browser (anon key, RLS-gated SELECT).
+ */
+export async function getPlayerProfile(
+  playerId: number,
+  season: number,
+): Promise<PlayerProfile | null> {
+  const sb = getSupabase();
+
+  const [playerRes, rowsRes, seasonRes] = await Promise.all([
+    sb.from("players").select("*").eq("id", playerId).maybeSingle(),
+    sb
+      .from("player_match_stats")
+      .select(PLAYER_PROFILE_SELECT)
+      .eq("player_id", playerId)
+      .eq("season", season),
+    sb
+      .from("player_season_stats")
+      .select("position, team_id")
+      .eq("player_id", playerId)
+      .eq("season", season)
+      .maybeSingle(),
+  ]);
+  if (playerRes.error) throw playerRes.error;
+  if (rowsRes.error) throw rowsRes.error;
+  // season-stats row is optional context (position); never fail the whole modal on it.
+  const player = playerRes.data as Player | null;
+  if (!player) return null;
+
+  const rows = ((rowsRes.data ?? []) as unknown as PlayerMatchStatsWithMatch[])
+    .filter((r) => r.match) // drop any orphaned rows defensively
+    .sort(
+      (a, b) =>
+        new Date(a.match!.kickoff_at).getTime() - new Date(b.match!.kickoff_at).getTime(),
+    );
+
+  // Resolve the player's team: season-stats first, else the latest match row.
+  const seasonRow = (seasonRes.data ?? null) as { position: string | null; team_id: number | null } | null;
+  const teamId =
+    seasonRow?.team_id ?? (rows.length ? rows[rows.length - 1].team_id : null);
+  let team: Team | null = null;
+  if (teamId != null) {
+    const { data } = await sb.from("teams").select("*").eq("id", teamId).maybeSingle();
+    team = (data as Team | null) ?? null;
+  }
+
+  // Per-match log + the rows that actually count toward "appearances".
+  const log: PlayerMatchLogEntry[] = rows.map((r) => {
+    const m = r.match!;
+    const isHome = m.home_team_id === r.team_id;
+    const teamScore = isHome ? m.home_score : m.away_score;
+    const opponentScore = isHome ? m.away_score : m.home_score;
+    const result: PlayerMatchLogEntry["result"] =
+      teamScore == null || opponentScore == null
+        ? null
+        : teamScore > opponentScore
+          ? "W"
+          : teamScore < opponentScore
+            ? "L"
+            : "D";
+    return {
+      matchId: m.id,
+      kickoffAt: m.kickoff_at,
+      stage: m.stage,
+      groupLetter: m.group_letter,
+      statusShort: m.status_short,
+      isHome,
+      opponent: isHome ? m.away_team : m.home_team,
+      teamScore,
+      opponentScore,
+      result,
+      minutes: r.minutes,
+      rating: r.rating,
+      goals: r.goals,
+      assists: r.assists,
+      yellow: r.yellow_cards,
+      red: r.red_cards,
+      started: (r.minutes ?? 0) > 0 && r.substitute !== true,
+    };
+  });
+
+  const played = rows.filter((r) => (r.minutes ?? 0) > 0);
+  // Minutes-weighted average rating over appearances that carry a rating.
+  let ratingWeighted = 0;
+  let ratingMinutes = 0;
+  let bestRating: number | null = null;
+  for (const r of played) {
+    if (r.rating != null) {
+      const mins = r.minutes ?? 0;
+      ratingWeighted += r.rating * mins;
+      ratingMinutes += mins;
+      bestRating = bestRating == null ? r.rating : Math.max(bestRating, r.rating);
+    }
+  }
+  // NOTE: at the player level `pass_accuracy` is the COUNT of accurate passes
+  // (not a %, unlike team_match_stats) — verified against the API data, where it
+  // tracks just below `passes`. Season accuracy = Σ accurate / Σ total.
+  const passesTotal = sum(rows.map((r) => r.passes));
+  const passesAccurate = sum(rows.map((r) => r.pass_accuracy));
+
+  const goals = sum(rows.map((r) => r.goals));
+  const assists = sum(rows.map((r) => r.assists));
+  const totals: PlayerProfileTotals = {
+    appearances: played.length,
+    starts: played.filter((r) => r.substitute !== true).length,
+    minutes: sum(rows.map((r) => r.minutes)),
+    goals,
+    assists,
+    goalContributions: goals + assists,
+    shots: sum(rows.map((r) => r.shots)),
+    shotsOnTarget: sum(rows.map((r) => r.shots_on_target)),
+    offsides: sum(rows.map((r) => r.offsides)),
+    keyPasses: sum(rows.map((r) => r.key_passes)),
+    passes: passesTotal,
+    passesAccurate,
+    passAccuracy: passesTotal > 0 ? Math.min((passesAccurate / passesTotal) * 100, 100) : null,
+    dribblesAttempted: sum(rows.map((r) => r.dribbles_attempted)),
+    dribblesSucceeded: sum(rows.map((r) => r.dribbles_succeeded)),
+    tackles: sum(rows.map((r) => r.tackles)),
+    interceptions: sum(rows.map((r) => r.interceptions)),
+    blocks: sum(rows.map((r) => r.blocks)),
+    dribbledPast: sum(rows.map((r) => r.dribbled_past)),
+    duels: sum(rows.map((r) => r.duels)),
+    duelsWon: sum(rows.map((r) => r.duels_won)),
+    foulsCommitted: sum(rows.map((r) => r.fouls_committed)),
+    foulsDrawn: sum(rows.map((r) => r.fouls_drawn)),
+    yellow: sum(rows.map((r) => r.yellow_cards)),
+    red: sum(rows.map((r) => r.red_cards)),
+    saves: sum(rows.map((r) => r.saves)),
+    goalsConceded: sum(rows.map((r) => r.goals_conceded)),
+    // Team clean sheets while the player was on the pitch.
+    cleanSheets: log.filter((e) => (e.minutes ?? 0) > 0 && e.opponentScore === 0).length,
+    penaltiesScored: sum(rows.map((r) => r.penalties_scored)),
+    penaltiesMissed: sum(rows.map((r) => r.penalties_missed)),
+    penaltiesWon: sum(rows.map((r) => r.penalties_won)),
+    penaltiesCommitted: sum(rows.map((r) => r.penalties_committed)),
+    penaltiesSaved: sum(rows.map((r) => r.penalties_saved)),
+    captainedMatches: played.filter((r) => r.captain === true).length,
+    avgRating: ratingMinutes > 0 ? ratingWeighted / ratingMinutes : null,
+    bestRating,
+  };
+
+  return {
+    player,
+    team,
+    position: seasonRow?.position ?? null,
+    season,
+    totals,
+    log,
+  };
 }
 
 /** Extract a stat value from a snapshot's API-Football-shaped statistics blob. */

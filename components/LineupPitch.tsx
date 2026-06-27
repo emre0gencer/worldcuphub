@@ -1,3 +1,4 @@
+import PlayerButton from "@/components/player/PlayerButton";
 import type { MatchLineup, MatchLineupPlayer, Team } from "@/lib/types";
 
 type Placed = { player: MatchLineupPlayer; x: number; y: number };
@@ -34,22 +35,30 @@ function placeStarters(players: MatchLineupPlayer[], isHome: boolean): Placed[] 
   return placed;
 }
 
-function PlayerMarker({ placed, color }: { placed: Placed; color: string }) {
+function PlayerMarker({ placed, color, season }: { placed: Placed; color: string; season: number }) {
   const { player, x, y } = placed;
   return (
     <div
-      className="absolute flex -translate-x-1/2 -translate-y-1/2 flex-col items-center gap-0.5"
+      className="absolute -translate-x-1/2 -translate-y-1/2"
       style={{ left: `${x}%`, top: `${y}%` }}
     >
-      <span
-        className="flex h-7 w-7 items-center justify-center rounded-full border border-white/70 font-mono text-[0.7rem] font-bold text-white shadow-md"
-        style={{ backgroundColor: color }}
+      <PlayerButton
+        playerId={player.player_id}
+        season={season}
+        highlight="rating"
+        name={player.player_name ?? undefined}
+        className="flex flex-col items-center gap-0.5"
       >
-        {player.shirt_number ?? ""}
-      </span>
-      <span className="max-w-[5.5rem] truncate rounded bg-black/35 px-1 text-[0.6rem] font-medium leading-tight text-white">
-        {player.player_name}
-      </span>
+        <span
+          className="flex h-7 w-7 items-center justify-center rounded-full border border-white/70 font-mono text-[0.7rem] font-bold text-white shadow-md"
+          style={{ backgroundColor: color }}
+        >
+          {player.shirt_number ?? ""}
+        </span>
+        <span className="max-w-[5.5rem] truncate rounded bg-black/35 px-1 text-[0.6rem] font-medium leading-tight text-white">
+          {player.player_name}
+        </span>
+      </PlayerButton>
     </div>
   );
 }
@@ -65,7 +74,17 @@ function TeamHeader({ team, lineup, align }: { team: Team; lineup?: MatchLineup;
   );
 }
 
-function SubsList({ team, players, color }: { team: Team; players: MatchLineupPlayer[]; color: string }) {
+function SubsList({
+  team,
+  players,
+  color,
+  season,
+}: {
+  team: Team;
+  players: MatchLineupPlayer[];
+  color: string;
+  season: number;
+}) {
   const subs = players.filter((p) => !p.starter);
   if (subs.length === 0) return null;
   return (
@@ -78,7 +97,15 @@ function SubsList({ team, players, color }: { team: Team; players: MatchLineupPl
         {subs.map((p) => (
           <li key={p.id} className="flex items-baseline gap-2 text-muted">
             <span className="w-6 text-right font-mono text-xs tabular-nums">{p.shirt_number}</span>
-            <span className="text-ink/80">{p.player_name}</span>
+            <PlayerButton
+              playerId={p.player_id}
+              season={season}
+              highlight="rating"
+              name={p.player_name ?? undefined}
+              className="text-ink/80"
+            >
+              {p.player_name}
+            </PlayerButton>
             {p.position && <span className="text-[0.65rem] uppercase tracking-wide">{p.position}</span>}
           </li>
         ))}
@@ -88,6 +115,7 @@ function SubsList({ team, players, color }: { team: Team; players: MatchLineupPl
 }
 
 export function LineupPitch({
+  season,
   home,
   away,
   homeLineup,
@@ -97,6 +125,7 @@ export function LineupPitch({
   homeColor,
   awayColor,
 }: {
+  season: number;
   home: Team;
   away: Team;
   homeLineup?: MatchLineup;
@@ -149,16 +178,16 @@ export function LineupPitch({
 
         {/* players */}
         {awayPlaced.map((pl) => (
-          <PlayerMarker key={pl.player.id} placed={pl} color={awayColor} />
+          <PlayerMarker key={pl.player.id} placed={pl} color={awayColor} season={season} />
         ))}
         {homePlaced.map((pl) => (
-          <PlayerMarker key={pl.player.id} placed={pl} color={homeColor} />
+          <PlayerMarker key={pl.player.id} placed={pl} color={homeColor} season={season} />
         ))}
       </div>
 
       <div className="grid gap-6 sm:grid-cols-2">
-        <SubsList team={home} players={homePlayers} color={homeColor} />
-        <SubsList team={away} players={awayPlayers} color={awayColor} />
+        <SubsList team={home} players={homePlayers} color={homeColor} season={season} />
+        <SubsList team={away} players={awayPlayers} color={awayColor} season={season} />
       </div>
     </div>
   );

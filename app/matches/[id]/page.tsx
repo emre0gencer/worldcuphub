@@ -7,6 +7,9 @@ import StatBar from "@/components/StatBar";
 import { MatchEventIcon, SubArrow } from "@/components/MatchEventIcon";
 import { LineupPitch } from "@/components/LineupPitch";
 import { RatingBadge } from "@/components/RatingBadge";
+import MatchTabs, { type MatchTab } from "@/components/MatchTabs";
+import MatchSquads, { type SquadPlayer } from "@/components/MatchSquads";
+import PlayerButton from "@/components/player/PlayerButton";
 import {
   getFormForTeams,
   getLatestPrediction,
@@ -24,7 +27,9 @@ import {
 } from "@/lib/queries";
 import type {
   MatchEvent,
+  MatchLineupPlayer,
   MatchWithTeams,
+  PlayerMatchStats,
   Team,
   TeamSeason,
 } from "@/lib/types";
@@ -436,19 +441,24 @@ async function LiveView({ match }: { match: MatchWithTeams }) {
 
 /** The descriptive content of one event, sans icon. For a substitution the
  *  player coming ON (API `assist`) is highlighted and the player going OFF
- *  (API `player`) is muted — the reverse of the raw field naming. */
-function EventBody({ e }: { e: MatchEvent }) {
+ *  (API `player`) is muted — the reverse of the raw field naming. Player names
+ *  open the PlayerWindow when an id is known. */
+function EventBody({ e, season }: { e: MatchEvent; season: number }) {
   if (e.type === "subst") {
     return (
       <span className="inline-flex flex-col leading-tight">
         <span className="flex items-center gap-1 font-semibold text-ink">
           <SubArrow direction="in" />
-          {e.assist_name ?? "—"}
+          <PlayerButton playerId={e.assist_id} season={season} name={e.assist_name ?? undefined}>
+            {e.assist_name ?? "—"}
+          </PlayerButton>
         </span>
         {e.player_name && (
           <span className="flex items-center gap-1 text-xs text-muted">
             <SubArrow direction="out" />
-            {e.player_name}
+            <PlayerButton playerId={e.player_id} season={season} name={e.player_name}>
+              {e.player_name}
+            </PlayerButton>
           </span>
         )}
       </span>
@@ -457,8 +467,23 @@ function EventBody({ e }: { e: MatchEvent }) {
   if (e.type === "Goal") {
     return (
       <span className="inline-flex flex-col leading-tight">
-        <span className="font-semibold text-ink">{e.player_name}</span>
-        {e.assist_name && <span className="text-xs text-muted">assist · {e.assist_name}</span>}
+        <PlayerButton
+          playerId={e.player_id}
+          season={season}
+          highlight="goals"
+          name={e.player_name ?? undefined}
+          className="font-semibold text-ink"
+        >
+          {e.player_name}
+        </PlayerButton>
+        {e.assist_name && (
+          <span className="text-xs text-muted">
+            assist ·{" "}
+            <PlayerButton playerId={e.assist_id} season={season} highlight="assists" name={e.assist_name}>
+              {e.assist_name}
+            </PlayerButton>
+          </span>
+        )}
         {(e.detail === "Own Goal" || e.detail === "Missed Penalty") && (
           <span className="text-xs text-muted">{e.detail === "Own Goal" ? "own goal" : "penalty missed"}</span>
         )}
@@ -469,14 +494,30 @@ function EventBody({ e }: { e: MatchEvent }) {
     return (
       <span className="inline-flex flex-col leading-tight">
         <span className="font-medium text-ink">{e.detail}</span>
-        {e.player_name && <span className="text-xs text-muted">{e.player_name}</span>}
+        {e.player_name && (
+          <PlayerButton playerId={e.player_id} season={season} name={e.player_name} className="text-xs text-muted">
+            {e.player_name}
+          </PlayerButton>
+        )}
       </span>
     );
   }
-  return <span className="font-medium text-ink">{e.player_name}</span>;
+  return (
+    <PlayerButton playerId={e.player_id} season={season} name={e.player_name ?? undefined} className="font-medium text-ink">
+      {e.player_name}
+    </PlayerButton>
+  );
 }
 
-function EventsTimeline({ events, match }: { events: MatchEvent[]; match: MatchWithTeams }) {
+function EventsTimeline({
+  events,
+  match,
+  bare = false,
+}: {
+  events: MatchEvent[];
+  match: MatchWithTeams;
+  bare?: boolean;
+}) {
   const regular = events.filter((e) => e.comments !== "Penalty Shootout");
   const shootout = events.filter((e) => e.comments === "Penalty Shootout");
 
@@ -487,7 +528,7 @@ function EventsTimeline({ events, match }: { events: MatchEvent[]; match: MatchW
     const content = (
       <span className={`flex items-center gap-2 ${isHome ? "flex-row-reverse text-right" : ""}`}>
         <MatchEventIcon event={e} />
-        <EventBody e={e} />
+        <EventBody e={e} season={match.season} />
       </span>
     );
     return (
@@ -508,9 +549,7 @@ function EventsTimeline({ events, match }: { events: MatchEvent[]; match: MatchW
 
   return (
     <section>
-      <h2 className="mb-2 eyebrow">
-        Timeline
-      </h2>
+      {!bare && <h2 className="mb-2 eyebrow">Timeline</h2>}
       {/* center spine */}
       <ul className="relative rounded-xl border border-border-warm bg-surface px-4 py-2 before:absolute before:inset-y-3 before:left-1/2 before:w-px before:-translate-x-1/2 before:bg-border-warm">
         {regular.map(row)}
@@ -529,6 +568,52 @@ function EventsTimeline({ events, match }: { events: MatchEvent[]; match: MatchW
 
 // ── finished ─────────────────────────────────────────────────────────────────
 
+/** Merge lineup rows (squad + shirt numbers + position) with finalized
+ *  per-player stats into the clickable squad sheet, falling back to stats-only
+ *  rows when no lineup was ingested. */
+function buildSquad(
+  teamId: number,
+  lineupPlayers: MatchLineupPlayer[],
+  playerStats: PlayerMatchStats[],
+): SquadPlayer[] {
+  const statByPlayer = new Map<number, PlayerMatchStats>();
+  for (const s of playerStats) {
+    if (s.player_id != null) statByPlayer.set(s.player_id, s);
+  }
+
+  const teamLineup = lineupPlayers.filter((l) => l.team_id === teamId);
+  if (teamLineup.length > 0) {
+    return teamLineup.map((l) => {
+      const s = l.player_id != null ? statByPlayer.get(l.player_id) : undefined;
+      return {
+        playerId: l.player_id,
+        name: l.player_name ?? s?.player?.name ?? "Unknown",
+        number: l.shirt_number,
+        position: l.position,
+        starter: l.starter,
+        minutes: s?.minutes ?? null,
+        rating: s?.rating ?? null,
+        goals: s?.goals ?? null,
+        assists: s?.assists ?? null,
+      };
+    });
+  }
+
+  return playerStats
+    .filter((s) => s.team_id === teamId)
+    .map((s) => ({
+      playerId: s.player_id,
+      name: s.player?.name ?? String(s.player_id),
+      number: null,
+      position: null,
+      starter: (s.minutes ?? 0) > 0 && s.substitute !== true,
+      minutes: s.minutes ?? null,
+      rating: s.rating ?? null,
+      goals: s.goals ?? null,
+      assists: s.assists ?? null,
+    }));
+}
+
 async function FinishedView({ match }: { match: MatchWithTeams }) {
   const home = match.home_team!;
   const away = match.away_team!;
@@ -546,9 +631,39 @@ async function FinishedView({ match }: { match: MatchWithTeams }) {
   const hs = teamStats.find((s) => s.team_id === home.id);
   const as = teamStats.find((s) => s.team_id === away.id);
 
+  const homeSquad = buildSquad(home.id, lineups.players, playerStats);
+  const awaySquad = buildSquad(away.id, lineups.players, playerStats);
+  const hasSquads = homeSquad.length > 0 || awaySquad.length > 0;
+
+  const tabs: MatchTab[] = [];
+  if (events.length > 0) {
+    tabs.push({
+      key: "timeline",
+      label: "Timeline",
+      content: <EventsTimeline events={events} match={match} bare />,
+    });
+  }
+  if (hasSquads) {
+    tabs.push({
+      key: "squads",
+      label: "Squads",
+      content: (
+        <MatchSquads
+          season={match.season}
+          home={home}
+          away={away}
+          homeSquad={homeSquad}
+          awaySquad={awaySquad}
+          homeColor={homeColor}
+          awayColor={awayColor}
+        />
+      ),
+    });
+  }
+
   return (
     <div className="space-y-8">
-      {events.length > 0 && <EventsTimeline events={events} match={match} />}
+      {tabs.length > 0 && <MatchTabs tabs={tabs} />}
 
       {hs && as && (
         <section>
@@ -669,6 +784,7 @@ async function FinishedView({ match }: { match: MatchWithTeams }) {
             Lineups
           </h2>
           <LineupPitch
+            season={match.season}
             home={home}
             away={away}
             homeLineup={lineups.teams.find((l) => l.team_id === home.id)}
@@ -706,7 +822,16 @@ async function FinishedView({ match }: { match: MatchWithTeams }) {
                       .sort((a, b) => (b.rating ?? -1) - (a.rating ?? -1))
                       .map((p) => (
                         <tr key={p.id} className="border-t border-border-light">
-                          <td className="py-1">{p.player?.name ?? p.player_id}</td>
+                          <td className="py-1">
+                            <PlayerButton
+                              playerId={p.player_id}
+                              season={match.season}
+                              highlight="rating"
+                              name={p.player?.name ?? undefined}
+                            >
+                              {p.player?.name ?? p.player_id}
+                            </PlayerButton>
+                          </td>
                           <td className="py-1 text-right font-mono tabular-nums">{p.minutes}</td>
                           <td className="py-1 text-right font-mono tabular-nums">{p.goals || ""}</td>
                           <td className="py-1 text-right font-mono tabular-nums">{p.assists || ""}</td>

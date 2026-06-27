@@ -267,6 +267,94 @@ export interface PlayerSeasonStats {
   team?: Team;
 }
 
+// ── Player profile (PlayerWindow) ────────────────────────────────────────────
+// Assembled client-side from `players` + this season's `player_match_stats`
+// (with each match's opponent embedded). Powers the PlayerWindow modal.
+
+/** Stat a caller can ask PlayerWindow to feature as the "main stat", chosen by
+ *  the context the player was clicked in (a scorer board → goals, etc.). */
+export type PlayerStatKey =
+  | "goals"
+  | "assists"
+  | "goal_contributions"
+  | "rating"
+  | "saves"
+  | "clean_sheets"
+  | "key_passes"
+  | "dribbles"
+  | "shots"
+  | "tackles"
+  | "interceptions"
+  | "minutes";
+
+export interface PlayerMatchLogEntry {
+  matchId: number;
+  kickoffAt: string;
+  stage: Stage;
+  groupLetter: string | null;
+  statusShort: string;
+  isHome: boolean;
+  opponent: Team | null;
+  teamScore: number | null;
+  opponentScore: number | null;
+  result: "W" | "D" | "L" | null;
+  minutes: number | null;
+  rating: number | null;
+  goals: number | null;
+  assists: number | null;
+  yellow: number | null;
+  red: number | null;
+  started: boolean;
+}
+
+export interface PlayerProfileTotals {
+  appearances: number;
+  starts: number;
+  minutes: number;
+  goals: number;
+  assists: number;
+  goalContributions: number;
+  shots: number;
+  shotsOnTarget: number;
+  offsides: number;
+  keyPasses: number;
+  passes: number;
+  passesAccurate: number;
+  passAccuracy: number | null; // % = passesAccurate / passes
+  dribblesAttempted: number;
+  dribblesSucceeded: number;
+  tackles: number;
+  interceptions: number;
+  blocks: number;
+  dribbledPast: number;
+  duels: number;
+  duelsWon: number;
+  foulsCommitted: number;
+  foulsDrawn: number;
+  yellow: number;
+  red: number;
+  saves: number;
+  goalsConceded: number;
+  cleanSheets: number;
+  penaltiesScored: number;
+  penaltiesMissed: number;
+  penaltiesWon: number;
+  penaltiesCommitted: number;
+  penaltiesSaved: number;
+  captainedMatches: number;
+  avgRating: number | null;
+  bestRating: number | null;
+}
+
+export interface PlayerProfile {
+  player: Player;
+  team: Team | null;
+  position: string | null; // G / D / M / F (season-level)
+  season: number;
+  totals: PlayerProfileTotals;
+  log: PlayerMatchLogEntry[]; // chronological (earliest → latest)
+}
+
 // Track 3 — derived analytics
 export interface TeamForm {
   id: number;

@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Fraunces, Hanken_Grotesk, Geist_Mono } from "next/font/google";
 import InteractiveGradientBg from "@/components/InteractiveGradientBg";
+import PlayerModalProvider from "@/components/player/PlayerModalProvider";
 import SeasonSwitcher from "@/components/SeasonSwitcher";
 import SiteMasthead from "@/components/SiteMasthead";
 import HomeLink from "@/components/HomeLink";
@@ -78,7 +79,9 @@ export default async function RootLayout({
           </nav>
         </header>
         <SiteMasthead season={activeSeason} />
-        <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-10">{children}</main>
+        <PlayerModalProvider>
+          <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-10">{children}</main>
+        </PlayerModalProvider>
         <footer className="mt-8 border-t border-border-warm bg-surface-warm/70 backdrop-blur-sm px-4 py-7 text-center">
           <p className="font-mono text-[0.65rem] uppercase tracking-[0.18em] text-foil">
             World Cup HUB
