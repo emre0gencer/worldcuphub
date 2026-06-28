@@ -1,24 +1,36 @@
 "use client";
 
 /**
- * Horizontal World-Cup knockout bracket (R32 → Final) rendered in the app's
- * almanac aesthetic: engraved cards, animated foil hairline connectors that are
- * *measured* from the real card geometry (so the tree stays exact at any size),
- * and a per-team "recent games" popover that opens into whichever vertical
- * blank space sits next to the hovered slot.
+ * Horizontal World-Cup knockout bracket (leaf round → Final) in the app's
+ * almanac aesthetic: engraved cards, animated foil hairline connectors measured
+ * from the real card geometry, and a per-team "recent games" panel.
+ *
+ * The panel is positioned inside the bracket's OWN coordinate space (not a
+ * viewport portal) so it can be dropped into guaranteed-blank regions — never
+ * overlapping a card. The placement rule is deterministic:
+ *   • leaf round (densest, leftmost) → a reserved blank LANE to its left;
+ *   • every other round → the vertical gap ABOVE the top team / BELOW the bottom
+ *     team of the card.
+ * The layout constants (LANE, VPAD, UNIT) are sized so the panel always fits the
+ * gap it opens into.
  */
 
 import Link from "next/link";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import type { BracketData, BracketMatchNode, BracketSlot, GameLine } from "@/lib/bracket";
 
 const COL_W = 212; // round column width (px)
-const GAP = 56; // gutter between rounds — room for the connector S-curves
-const UNIT = 86; // vertical slot per R32 tie; sets the whole bracket height
 const CHAMP_W = 164;
+const GAP = 56; // gutter between rounds — room for the connector S-curves
+const UNIT = 100; // vertical slot per leaf tie; sets the bracket's inner height
+const VPAD = 92; // blank padding above/below so edge cards have a gap to open into
+const LANE = 236; // blank lane left of the leaf column for its panels
 
-// ── recent-games popover ─────────────────────────────────────────────────────
+const PANEL_W = 212;
+const PANEL_H = 112;
+const PANEL_GAP = 10; // space between a card and its panel
+
+// ── recent-games panel ───────────────────────────────────────────────────────
 
 function resultStyle(r: GameLine["result"]): string {
   if (r === "W") return "bg-pitch/15 text-pitch";
@@ -26,83 +38,55 @@ function resultStyle(r: GameLine["result"]): string {
   return "bg-neutral-300/60 text-neutral-600";
 }
 
-function RecentGamesPopover({
-  teamName,
-  games,
-  anchor,
-  openUp,
-  onEnter,
-  onLeave,
-}: {
-  teamName: string;
-  games: GameLine[];
-  anchor: DOMRect;
-  openUp: boolean;
-  onEnter: () => void;
-  onLeave: () => void;
-}) {
-  const width = 248;
-  const left = Math.max(8, Math.min(anchor.left - 4, window.innerWidth - width - 8));
-  const style: React.CSSProperties = openUp
-    ? { bottom: window.innerHeight - anchor.top + 6, left, width }
-    : { top: anchor.bottom + 6, left, width };
-
-  return createPortal(
-    <div
-      className="bracket-pop fixed z-[80]"
-      style={style}
-      onMouseEnter={onEnter}
-      onMouseLeave={onLeave}
-    >
-      <div className="overflow-hidden rounded-xl border border-border-warm bg-surface/95 shadow-[0_12px_40px_-12px_rgba(27,22,19,0.45)] backdrop-blur-sm ring-1 ring-foil/10">
-        <div className="flex items-center justify-between gap-2 border-b border-border-light bg-surface-warm/60 px-3 py-2">
-          <span className="font-mono text-[0.6rem] uppercase tracking-[0.14em] text-foil">
-            Recent games
-          </span>
-          <span className="truncate font-display text-xs font-bold text-ink">{teamName}</span>
-        </div>
-        {games.length === 0 ? (
-          <p className="px-3 py-3 text-xs text-muted">No matches played yet.</p>
-        ) : (
-          // 3-game window; the rest is reachable by scrolling
-          <ul className="max-h-[126px] divide-y divide-border-light overflow-y-auto overscroll-contain">
-            {games.map((g) => (
-              <li key={g.matchId}>
-                <Link
-                  href={`/matches/${g.matchId}`}
-                  className="flex items-center gap-2 px-3 py-2 transition-colors hover:bg-surface-warm/70"
-                >
-                  <span className="w-12 shrink-0 font-mono text-[0.58rem] uppercase tracking-wider text-muted">
-                    {g.stageLabel}
-                  </span>
-                  <span className="flex min-w-0 flex-1 items-center gap-1.5">
-                    {g.oppLogo && (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={g.oppLogo} alt="" className="h-3.5 w-3.5 shrink-0 object-contain" />
-                    )}
-                    <span className="truncate text-xs text-ink/90">{g.oppName}</span>
-                  </span>
-                  <span className="shrink-0 font-mono text-xs font-semibold tabular-nums text-ink">
-                    {g.teamScore}–{g.oppScore}
-                    {g.pens && <span className="text-[0.6rem] text-muted"> {g.pens}</span>}
-                  </span>
-                  {g.live ? (
-                    <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-red-500" />
-                  ) : (
-                    <span
-                      className={`grid h-4 w-4 shrink-0 place-items-center rounded text-[0.6rem] font-bold ${resultStyle(g.result)}`}
-                    >
-                      {g.result}
-                    </span>
-                  )}
-                </Link>
-              </li>
-            ))}
-          </ul>
-        )}
+function RecentGames({ teamName, games }: { teamName: string; games: GameLine[] }) {
+  return (
+    <div className="flex h-full flex-col overflow-hidden rounded-xl border border-border-warm bg-surface/95 shadow-[0_14px_40px_-14px_rgba(27,22,19,0.5)] ring-1 ring-foil/10 backdrop-blur-sm">
+      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border-light bg-surface-warm/60 px-3 py-1.5">
+        <span className="font-mono text-[0.58rem] uppercase tracking-[0.14em] text-foil">
+          Recent games
+        </span>
+        <span className="truncate font-display text-xs font-bold text-ink">{teamName}</span>
       </div>
-    </div>,
-    document.body,
+      {games.length === 0 ? (
+        <p className="px-3 py-3 text-xs text-muted">No matches played yet.</p>
+      ) : (
+        // ~3-game window; the rest is reachable by scrolling
+        <ul className="flex-1 divide-y divide-border-light overflow-y-auto overscroll-contain">
+          {games.map((g) => (
+            <li key={g.matchId}>
+              <Link
+                href={`/matches/${g.matchId}`}
+                className="flex items-center gap-1.5 px-2.5 py-1 transition-colors hover:bg-surface-warm/70"
+              >
+                <span className="w-11 shrink-0 font-mono text-[0.55rem] uppercase tracking-wider text-muted">
+                  {g.stageLabel}
+                </span>
+                <span className="flex min-w-0 flex-1 items-center gap-1.5">
+                  {g.oppLogo && (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={g.oppLogo} alt="" className="h-3.5 w-3.5 shrink-0 object-contain" />
+                  )}
+                  <span className="truncate text-[0.72rem] text-ink/90">{g.oppName}</span>
+                </span>
+                <span className="shrink-0 font-mono text-[0.72rem] font-semibold tabular-nums text-ink">
+                  {g.teamScore}–{g.oppScore}
+                  {g.pens && <span className="text-[0.58rem] text-muted"> {g.pens}</span>}
+                </span>
+                {g.live ? (
+                  <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-red-500" />
+                ) : (
+                  <span
+                    className={`grid h-3.5 w-3.5 shrink-0 place-items-center rounded text-[0.55rem] font-bold ${resultStyle(g.result)}`}
+                  >
+                    {g.result}
+                  </span>
+                )}
+              </Link>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }
 
@@ -114,21 +98,17 @@ function TeamRow({
   onLeaveTeam,
 }: {
   slot: BracketSlot;
-  onHover: (teamId: number, name: string, rect: DOMRect) => void;
+  onHover: (teamId: number, name: string) => void;
   onLeaveTeam: () => void;
 }) {
   const hoverable = slot.teamId != null;
   return (
     <div
-      onMouseEnter={
-        hoverable
-          ? (e) => onHover(slot.teamId!, slot.name ?? "", e.currentTarget.getBoundingClientRect())
-          : undefined
-      }
+      onMouseEnter={hoverable ? () => onHover(slot.teamId!, slot.name ?? "") : undefined}
       onMouseLeave={hoverable ? onLeaveTeam : undefined}
       className={`group/row relative flex items-center gap-1.5 px-2.5 py-1.5 transition-colors ${
         hoverable ? "cursor-default hover:bg-foil/[0.06]" : ""
-      } ${slot.winner ? "" : slot.name ? "" : "text-muted"}`}
+      }`}
     >
       {slot.winner && (
         <span className="absolute inset-y-1 left-0 w-[3px] rounded-full bg-gradient-to-b from-foil-bright to-foil" />
@@ -150,7 +130,7 @@ function TeamRow({
       >
         {slot.name ?? slot.label}
       </span>
-      {slot.name && (
+      {slot.name && slot.label && (
         <span className="shrink-0 font-mono text-[0.58rem] uppercase tracking-wider text-muted/55">
           {slot.label}
         </span>
@@ -172,17 +152,25 @@ function MatchCard({
   onLeaveTeam,
 }: {
   node: BracketMatchNode;
-  cardRef: (el: HTMLElement | null) => void;
-  onHover: (teamId: number, name: string, rect: DOMRect) => void;
+  cardRef?: (el: HTMLElement | null) => void;
+  onHover: (node: BracketMatchNode, isHome: boolean, teamId: number, name: string) => void;
   onLeaveTeam: () => void;
 }) {
   const isLive = node.status === "live";
   const isEmpty = node.status === "empty";
   const body = (
     <>
-      <TeamRow slot={node.home} onHover={onHover} onLeaveTeam={onLeaveTeam} />
+      <TeamRow
+        slot={node.home}
+        onHover={(id, name) => onHover(node, true, id, name)}
+        onLeaveTeam={onLeaveTeam}
+      />
       <div className="mx-2.5 h-px bg-border-light" />
-      <TeamRow slot={node.away} onHover={onHover} onLeaveTeam={onLeaveTeam} />
+      <TeamRow
+        slot={node.away}
+        onHover={(id, name) => onHover(node, false, id, name)}
+        onLeaveTeam={onLeaveTeam}
+      />
       {isLive && (
         <span className="pointer-events-none absolute -top-2 left-1/2 -translate-x-1/2 rounded-full bg-red-500 px-1.5 py-0.5 font-mono text-[0.55rem] font-bold uppercase tracking-wider text-white shadow-sm">
           ● Live
@@ -214,12 +202,21 @@ function MatchCard({
 
 // ── the bracket ──────────────────────────────────────────────────────────────
 
+type PanelSide = "left" | "up" | "down";
+
 interface HoverState {
   teamId: number;
   name: string;
-  anchor: DOMRect;
-  openUp: boolean;
+  left: number;
+  top: number;
+  side: PanelSide;
 }
+
+const ORIGIN: Record<PanelSide, string> = {
+  left: "right center",
+  up: "center bottom",
+  down: "center top",
+};
 
 export default function KnockoutBracket({ data }: { data: BracketData }) {
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -229,8 +226,10 @@ export default function KnockoutBracket({ data }: { data: BracketData }) {
   const [hover, setHover] = useState<HoverState | null>(null);
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const leafRound = data.rounds[0]?.key;
   const rows = data.rounds[0]?.matches.length ?? 0;
-  const height = Math.max(rows * UNIT, 320);
+  const innerH = Math.max(rows * UNIT, 320);
+  const height = innerH + VPAD * 2;
 
   // Measure card geometry and rebuild the connector paths.
   const measure = useCallback(() => {
@@ -244,10 +243,7 @@ export default function KnockoutBracket({ data }: { data: BracketData }) {
         y: b.top - wb.top + b.height / 2,
       };
     };
-    const curve = (
-      a: { x: number; y: number },
-      b: { x: number; y: number },
-    ) => {
+    const curve = (a: { x: number; y: number }, b: { x: number; y: number }) => {
       const dx = Math.max((b.x - a.x) / 2, 12);
       return `M${a.x},${a.y} C${a.x + dx},${a.y} ${b.x - dx},${b.y} ${b.x},${b.y}`;
     };
@@ -266,7 +262,6 @@ export default function KnockoutBracket({ data }: { data: BracketData }) {
         }
       });
     }
-    // Final → champion plinth
     const finalEl = cards.current.get(data.rounds[data.rounds.length - 1]?.matches[0]?.id ?? "");
     const champEl = cards.current.get("champion");
     if (finalEl && champEl) paths.push(curve(edge(finalEl, "right"), edge(champEl, "left")));
@@ -311,26 +306,50 @@ export default function KnockoutBracket({ data }: { data: BracketData }) {
     closeTimer.current = setTimeout(() => setHover(null), 140);
   };
 
-  const onHover = useCallback((teamId: number, name: string, anchor: DOMRect) => {
-    clearClose();
-    const wrap = wrapRef.current;
-    let openUp = false;
-    if (wrap) {
+  // Drop the panel into the blank region beside the hovered slot.
+  const onHover = useCallback(
+    (node: BracketMatchNode, isHome: boolean, teamId: number, name: string) => {
+      clearClose();
+      const wrap = wrapRef.current;
+      const card = cards.current.get(node.id);
+      if (!wrap || !card) return;
       const wb = wrap.getBoundingClientRect();
-      const rel = (anchor.top + anchor.height / 2 - wb.top) / Math.max(wb.height, 1);
-      openUp = rel > 0.5; // lower half of the bracket → grow upward into the gap
-    }
-    // keep it on-screen regardless of the bracket-relative preference
-    if (openUp && anchor.top < 160) openUp = false;
-    if (!openUp && window.innerHeight - anchor.bottom < 160) openUp = true;
-    setHover({ teamId, name, anchor, openUp });
-  }, []);
+      const cb = card.getBoundingClientRect();
+      const cx = cb.left - wb.left;
+      const cy = cb.top - wb.top;
+
+      let left: number;
+      let top: number;
+      let side: PanelSide;
+      if (node.round === leafRound) {
+        // leftmost / densest round → reserved blank lane to the left
+        side = "left";
+        left = cx - PANEL_W - PANEL_GAP;
+        top = cy + cb.height / 2 - PANEL_H / 2;
+      } else if (isHome) {
+        // top team → blank gap above the card
+        side = "up";
+        left = cx + cb.width / 2 - PANEL_W / 2;
+        top = cy - PANEL_GAP - PANEL_H;
+      } else {
+        // bottom team → blank gap below the card
+        side = "down";
+        left = cx + cb.width / 2 - PANEL_W / 2;
+        top = cy + cb.height + PANEL_GAP;
+      }
+      // safety clamp inside the bracket box (sizing already keeps it off cards)
+      left = Math.max(6, Math.min(left, wrap.clientWidth - PANEL_W - 6));
+      top = Math.max(6, Math.min(top, wrap.clientHeight - PANEL_H - 6));
+      setHover({ teamId, name, left, top, side });
+    },
+    [leafRound],
+  );
 
   return (
-    <div className="-mx-1 overflow-x-auto pb-4">
+    <div className="bracket-fullbleed overflow-x-auto pb-4">
       <div className="min-w-max px-1">
-        {/* round labels */}
-        <div className="mb-4 flex" style={{ gap: GAP }}>
+        {/* round labels (offset to clear the left panel lane) */}
+        <div className="mb-4 flex" style={{ gap: GAP, paddingLeft: LANE }}>
           {data.rounds.map((round, i) => (
             <div
               key={round.key}
@@ -355,14 +374,13 @@ export default function KnockoutBracket({ data }: { data: BracketData }) {
         </div>
 
         {/* bracket body */}
-        <div ref={wrapRef} className="relative flex" style={{ gap: GAP, height }}>
+        <div
+          ref={wrapRef}
+          className="relative flex"
+          style={{ gap: GAP, height, paddingLeft: LANE, paddingTop: VPAD, paddingBottom: VPAD }}
+        >
           {/* connector layer */}
-          <svg
-            className="pointer-events-none absolute inset-0"
-            width={size.w}
-            height={size.h}
-            fill="none"
-          >
+          <svg className="pointer-events-none absolute inset-0" width={size.w} height={size.h} fill="none">
             <defs>
               <linearGradient id="foilLink" x1="0" y1="0" x2="1" y2="0">
                 <stop offset="0%" stopColor="var(--color-foil)" stopOpacity="0.25" />
@@ -398,6 +416,21 @@ export default function KnockoutBracket({ data }: { data: BracketData }) {
                   onLeaveTeam={scheduleClose}
                 />
               ))}
+              {round.key === "SF" && data.thirdPlace && (
+                // play-off for 3rd, centered in the empty space between the two SFs
+                <div className="absolute inset-x-0 top-1/2 z-20 -translate-y-1/2">
+                  <div className="relative rounded-lg bg-gradient-to-b from-amber-50/60 to-transparent p-1 ring-1 ring-amber-700/15">
+                    <div className="absolute inset-x-0 -top-4 text-center font-mono text-[0.55rem] uppercase tracking-[0.16em] text-amber-700/70">
+                      ◦ Third place ◦
+                    </div>
+                    <MatchCard
+                      node={data.thirdPlace}
+                      onHover={onHover}
+                      onLeaveTeam={scheduleClose}
+                    />
+                  </div>
+                </div>
+              )}
             </div>
           ))}
 
@@ -414,19 +447,26 @@ export default function KnockoutBracket({ data }: { data: BracketData }) {
               cardRef={registerCard("champion")}
             />
           </div>
+
+          {/* recent-games panel — always inside a blank region of the bracket */}
+          {hover && (
+            <div
+              className="bracket-pop absolute z-40"
+              style={{
+                left: hover.left,
+                top: hover.top,
+                width: PANEL_W,
+                height: PANEL_H,
+                transformOrigin: ORIGIN[hover.side],
+              }}
+              onMouseEnter={clearClose}
+              onMouseLeave={scheduleClose}
+            >
+              <RecentGames teamName={hover.name} games={data.recentGames[hover.teamId] ?? []} />
+            </div>
+          )}
         </div>
       </div>
-
-      {hover && (
-        <RecentGamesPopover
-          teamName={hover.name}
-          games={data.recentGames[hover.teamId] ?? []}
-          anchor={hover.anchor}
-          openUp={hover.openUp}
-          onEnter={clearClose}
-          onLeave={scheduleClose}
-        />
-      )}
     </div>
   );
 }

@@ -36,20 +36,47 @@ const R32_SLOTS_2026: [string, string][] = [
   ["1K", "3L"], // M87
 ];
 
-/** Seasons for which a canonical leaf order is encoded (drives the fancy tree). */
-export function hasBracketStructure(season: number): boolean {
-  return season === 2026;
+// R16 leaves in top→bottom bracket order for the 2022 (32-team) format, which
+// opens at the Round of 16. Slots verified against the final 2022 standings; the
+// fold (winners → QF → SF → Final) was cross-checked against the actual results.
+const R16_SLOTS_2022: [string, string][] = [
+  ["1A", "2B"], // Netherlands v USA
+  ["1C", "2D"], // Argentina v Australia
+  ["1E", "2F"], // Japan v Croatia
+  ["1G", "2H"], // Brazil v South Korea
+  ["1F", "2E"], // Morocco v Spain
+  ["1H", "2G"], // Portugal v Switzerland
+  ["1B", "2A"], // England v Senegal
+  ["1D", "2C"], // France v Poland
+];
+
+export type BracketRoundKey = "R32" | "R16" | "QF" | "SF" | "final";
+
+interface SeasonBracket {
+  rounds: BracketRoundKey[]; // leaf round first → "final" last
+  leafSlots: [string, string][]; // group-finish slot pairs for the leaf round
 }
 
-const ROUND_ORDER = ["R32", "R16", "QF", "SF", "final"] as const;
-export type BracketRoundKey = (typeof ROUND_ORDER)[number];
+// The leaf round differs by era: the 48-team 2026 format opens at the Round of
+// 32, the 32-team 2022 format at the Round of 16. Everything above the leaves is
+// the same perfect binary fold.
+const SEASON_BRACKETS: Record<number, SeasonBracket> = {
+  2026: { rounds: ["R32", "R16", "QF", "SF", "final"], leafSlots: R32_SLOTS_2026 },
+  2022: { rounds: ["R16", "QF", "SF", "final"], leafSlots: R16_SLOTS_2022 },
+};
 
-const ROUND_LABEL: Record<BracketRoundKey, string> = {
+/** Seasons for which a canonical leaf order is encoded (drives the fancy tree). */
+export function hasBracketStructure(season: number): boolean {
+  return season in SEASON_BRACKETS;
+}
+
+const ROUND_LABEL: Record<string, string> = {
   R32: "Round of 32",
   R16: "Round of 16",
   QF: "Quarter-finals",
   SF: "Semi-finals",
   final: "Final",
+  third_place: "Third place",
 };
 
 // ── serializable shapes handed to the client component ──────────────────────
@@ -96,9 +123,10 @@ export interface GameLine {
 }
 
 export interface BracketData {
-  rounds: BracketRound[]; // R32 → Final
+  rounds: BracketRound[]; // leaf round → Final
   champion: BracketSlot | null;
   finalistHint: string | null; // shown on the plinth before the final is played
+  thirdPlace: BracketMatchNode | null; // played-off 3rd place (e.g. 2022), if any
   recentGames: Record<number, GameLine[]>; // teamId → newest-first tournament log
 }
 
@@ -172,7 +200,9 @@ export function buildKnockoutBracket(
   matches: MatchWithTeams[],
   standings: StandingsRow[],
 ): BracketData | null {
-  if (!hasBracketStructure(season)) return null;
+  const config = SEASON_BRACKETS[season];
+  if (!config) return null;
+  const leafRound = config.rounds[0];
 
   // group-slot ("1E") → Team, from the (cross-checked) stored standings.
   const slotTeam = new Map<string, Team>();
@@ -232,9 +262,9 @@ export function buildKnockoutBracket(
     };
   };
 
-  // ── level 0: the 16 Round-of-32 leaves ───────────────────────────────────
+  // ── level 0: the leaf round (R32 in 2026, R16 in 2022) ───────────────────
   const levels: BuildNode[][] = [];
-  const r32: BuildNode[] = R32_SLOTS_2026.map(([homeSlot, awaySlot], i) => {
+  const leaves: BuildNode[] = config.leafSlots.map(([homeSlot, awaySlot], i) => {
     const homeTeam = slotTeam.get(homeSlot) ?? null;
     const awayTeam = slotTeam.get(awaySlot) ?? null;
     const match =
@@ -244,8 +274,8 @@ export function buildKnockoutBracket(
     const home = slotFor(match, homeTeam?.id ?? null, homeSlot);
     const away = slotFor(match, awayTeam?.id ?? null, awaySlot);
     return {
-      id: `R32-${i}`,
-      round: "R32",
+      id: `${leafRound}-${i}`,
+      round: leafRound,
       matchId: match?.id ?? null,
       status: match ? match.status : homeTeam && awayTeam ? "scheduled" : "empty",
       kickoff: match?.kickoff_at ?? null,
@@ -256,9 +286,9 @@ export function buildKnockoutBracket(
       winnerTeamId: match ? winnerOf(match) : null,
     };
   });
-  levels.push(r32);
+  levels.push(leaves);
 
-  // ── levels 1..4: fold winners upward ─────────────────────────────────────
+  // ── upper levels: fold winners upward to the final ───────────────────────
   const feederHint = (child: BuildNode): { label: string; teamId: number | null } => {
     // The participant is the winner of `child`; show it once decided, else a
     // hint of the two teams that could arrive (only meaningful one round down).
@@ -272,8 +302,8 @@ export function buildKnockoutBracket(
     return { label: "TBD", teamId: null };
   };
 
-  for (let L = 1; L < ROUND_ORDER.length; L++) {
-    const round = ROUND_ORDER[L];
+  for (let L = 1; L < config.rounds.length; L++) {
+    const round = config.rounds[L];
     const prev = levels[L - 1];
     const nodes: BuildNode[] = [];
     for (let j = 0; j < prev.length / 2; j++) {
@@ -308,8 +338,8 @@ export function buildKnockoutBracket(
   }
 
   const rounds: BracketRound[] = levels.map((nodes, L) => ({
-    key: ROUND_ORDER[L],
-    label: ROUND_LABEL[ROUND_ORDER[L]],
+    key: config.rounds[L],
+    label: ROUND_LABEL[config.rounds[L]],
     matches: nodes.map((n) => ({
       id: n.id,
       round: n.round,
@@ -341,6 +371,24 @@ export function buildKnockoutBracket(
       ? `${abbr(teamById.get(finalNode.homeTeamId))} v ${abbr(teamById.get(finalNode.awayTeamId))}`
       : null;
 
+  // third-place play-off (2022 has one; 2026 will eventually). Bound straight to
+  // its fixture rather than folded from the tree.
+  const tp =
+    matches.find(
+      (m) => m.stage === "third_place" && m.home_team_id != null && m.away_team_id != null,
+    ) ?? null;
+  const thirdPlace: BracketMatchNode | null = tp
+    ? {
+        id: "third_place",
+        round: "final", // not a real round key — unused for rendering
+        matchId: tp.id,
+        status: tp.status,
+        kickoff: tp.kickoff_at,
+        home: slotFor(tp, tp.home_team_id, ""),
+        away: slotFor(tp, tp.away_team_id, ""),
+      }
+    : null;
+
   // recent-game logs for every team currently placed in the bracket
   const placed = new Set<number>();
   for (const lvl of levels)
@@ -348,8 +396,10 @@ export function buildKnockoutBracket(
       if (n.homeTeamId != null) placed.add(n.homeTeamId);
       if (n.awayTeamId != null) placed.add(n.awayTeamId);
     }
+  if (tp?.home_team_id != null) placed.add(tp.home_team_id);
+  if (tp?.away_team_id != null) placed.add(tp.away_team_id);
   const recentGames: Record<number, GameLine[]> = {};
   for (const teamId of placed) recentGames[teamId] = buildTeamLog(teamId, matches);
 
-  return { rounds, champion, finalistHint, recentGames };
+  return { rounds, champion, finalistHint, thirdPlace, recentGames };
 }

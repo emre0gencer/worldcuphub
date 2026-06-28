@@ -317,18 +317,19 @@ export default async function StandingsPage() {
       </>
     );
 
-  // ── 2026: knockout bracket leads, group stage scrolls below ───────────────
+  // ── knockout bracket leads, group stage scrolls below ─────────────────────
   if (bracket) {
+    const koTeams = (bracket.rounds[0]?.matches.length ?? 0) * 2;
     return (
       <div className="space-y-14">
         <div className="reveal">
           <SectionHeading
-            eyebrow="Knockout · road to MetLife"
+            eyebrow="Knockout stage"
             title="The Bracket"
             standfirst={
               <>
-                Thirty-two nations, one trophy — the complete route to the final. Hover any team
-                for their tournament so far, or open a tie for the full match page.{" "}
+                {koTeams} teams, one trophy — the complete route to the final. Hover any team for
+                their tournament so far, or open a tie for the full match page.{" "}
                 <Link
                   href="/rankings"
                   className="text-foil underline decoration-foil/40 underline-offset-2 transition-colors hover:text-ink"

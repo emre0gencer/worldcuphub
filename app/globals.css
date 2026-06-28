@@ -123,6 +123,20 @@ body::after {
 }
 
 /* ── Knockout bracket ───────────────────────────────────────────────────── */
+/* Full-bleed: let the (scrollable) bracket use the page's blank side margins on
+   wide screens. Inset 2rem so the vertical scrollbar never forces a horizontal
+   one; only breaks out at lg+ so narrow screens keep the normal flow. */
+.bracket-fullbleed {
+  margin-left: -0.25rem;
+  margin-right: -0.25rem;
+}
+@media (min-width: 1024px) {
+  .bracket-fullbleed {
+    margin-left: calc(50% - 50vw + 2rem);
+    margin-right: calc(50% - 50vw + 2rem);
+  }
+}
+
 /* Foil connector hairlines draw themselves in (pathLength normalised to 1). */
 @keyframes bracket-draw {
   from {
