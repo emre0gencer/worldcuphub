@@ -122,6 +122,59 @@ body::after {
   animation: modal-in 0.26s cubic-bezier(0.2, 0.7, 0.2, 1) both;
 }
 
+/* ── Knockout bracket ───────────────────────────────────────────────────── */
+/* Foil connector hairlines draw themselves in (pathLength normalised to 1). */
+@keyframes bracket-draw {
+  from {
+    stroke-dashoffset: 1;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+.bracket-link {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: bracket-draw 0.9s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+/* Recent-games popover entrance */
+@keyframes bracket-pop {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.bracket-pop {
+  animation: bracket-pop 0.16s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  transform-origin: top left;
+}
+
+/* Champion plinth: a slow foil sheen sweeping across the gold card */
+.champ-sheen {
+  background: linear-gradient(
+    115deg,
+    transparent 30%,
+    rgba(255, 255, 255, 0.55) 48%,
+    transparent 66%
+  );
+  background-size: 250% 100%;
+  animation: champ-sweep 5.5s ease-in-out infinite;
+}
+@keyframes champ-sweep {
+  0%,
+  100% {
+    background-position: 180% 0;
+  }
+  50% {
+    background-position: -60% 0;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .reveal {
     animation: none;
@@ -131,6 +184,14 @@ body::after {
   }
   .modal-overlay,
   .modal-card {
+    animation: none;
+  }
+  .bracket-link {
+    animation: none;
+    stroke-dashoffset: 0;
+  }
+  .bracket-pop,
+  .champ-sheen {
     animation: none;
   }
 }

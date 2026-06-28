@@ -1,7 +1,9 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import KnockoutBracket from "@/components/KnockoutBracket";
 import SectionHeading, { Kicker } from "@/components/SectionHeading";
-import { getAllMatches } from "@/lib/queries";
+import { buildKnockoutBracket } from "@/lib/bracket";
+import { getAllMatches, getStoredStandings } from "@/lib/queries";
 import { getActiveSeason } from "@/lib/season-server";
 import type { MatchWithTeams, Team } from "@/lib/types";
 
@@ -283,10 +285,77 @@ function Bracket({ matches }: { matches: MatchWithTeams[] }) {
 export default async function StandingsPage() {
   const season = await getActiveSeason();
 
-  const matches = await getAllMatches(season);
+  const [matches, standings] = await Promise.all([
+    getAllMatches(season),
+    getStoredStandings(season),
+  ]);
   const groups = buildGroupTables(matches);
   const hasLiveGroups = [...groups.values()].some((rows) => rows.some((r) => r.hasLive));
+  const bracket = buildKnockoutBracket(season, matches, standings);
 
+  // The group tables, shared by both layouts (renamed "Group stage" section).
+  const groupSection =
+    groups.size === 0 ? (
+      <p className="text-sm text-muted">No group-stage matches found for {season}.</p>
+    ) : (
+      <>
+        <div
+          className="reveal grid gap-5 sm:grid-cols-2"
+          style={{ "--d": "80ms" } as React.CSSProperties}
+        >
+          {[...groups.entries()].map(([letter, rows]) => (
+            <GroupTable key={letter} letter={letter} rows={rows} />
+          ))}
+        </div>
+        {hasLiveGroups && (
+          <p className="mt-4 text-xs text-muted">
+            <span className="inline-block h-1.5 w-1.5 rounded-full bg-red-500 align-middle" />{" "}
+            Teams shown in red are currently playing. Their live score is included as a provisional
+            result.
+          </p>
+        )}
+      </>
+    );
+
+  // ── 2026: knockout bracket leads, group stage scrolls below ───────────────
+  if (bracket) {
+    return (
+      <div className="space-y-14">
+        <div className="reveal">
+          <SectionHeading
+            eyebrow="Knockout · road to MetLife"
+            title="The Bracket"
+            standfirst={
+              <>
+                Thirty-two nations, one trophy — the complete route to the final. Hover any team
+                for their tournament so far, or open a tie for the full match page.{" "}
+                <Link
+                  href="/rankings"
+                  className="text-foil underline decoration-foil/40 underline-offset-2 transition-colors hover:text-ink"
+                >
+                  Form rankings
+                </Link>{" "}
+                are computed separately.
+              </>
+            }
+          />
+        </div>
+
+        <KnockoutBracket data={bracket} />
+
+        <div className="hairline" />
+
+        <section>
+          <div className="reveal mb-6">
+            <SectionHeading as="h2" eyebrow="Final tables" title="Group stage" />
+          </div>
+          {groupSection}
+        </section>
+      </div>
+    );
+  }
+
+  // ── other seasons: original group-first layout + simple column bracket ────
   return (
     <div className="space-y-12">
       <div className="reveal">
@@ -309,28 +378,11 @@ export default async function StandingsPage() {
         />
       </div>
 
-      {groups.size === 0 ? (
-        <p className="text-sm text-muted">No group-stage matches found for {season}.</p>
-      ) : (
-        <>
-          <div className="reveal grid gap-5 sm:grid-cols-2" style={{ "--d": "80ms" } as React.CSSProperties}>
-            {[...groups.entries()].map(([letter, rows]) => (
-              <GroupTable key={letter} letter={letter} rows={rows} />
-            ))}
-          </div>
-          {hasLiveGroups && (
-            <p className="text-xs text-muted">
-              <span className="inline-block h-1.5 w-1.5 rounded-full bg-red-500 align-middle" />{" "}
-              Teams shown in red are currently playing. Their live score is included as a provisional result.
-            </p>
-          )}
-        </>
-      )}
+      {groupSection}
 
       <div className="reveal" style={{ "--d": "160ms" } as React.CSSProperties}>
         <Bracket matches={matches} />
       </div>
-
     </div>
   );
 }
