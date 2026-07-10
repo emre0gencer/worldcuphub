@@ -18,7 +18,7 @@ import time
 from datetime import datetime, timezone
 from typing import Any
 
-from . import config, db, pipeline
+from . import analytics, config, db, pipeline
 from .api_football import ApiFootballClient, status_of
 
 log = logging.getLogger("ingest")
@@ -26,13 +26,56 @@ log = logging.getLogger("ingest")
 SEASON = config.API_FOOTBALL_SEASON
 
 
-def discover_live_match_ids(api: ApiFootballClient) -> tuple[set[int], dict[int, str]]:
-    """One cheap fixtures-list call: live ids + status of every fixture."""
-    statuses: dict[int, str] = {}
-    for fx in api.fixtures(SEASON):
-        statuses[fx["fixture"]["id"]] = status_of(fx)
+def discover_live_match_ids(
+    api: ApiFootballClient,
+) -> tuple[set[int], dict[int, str], list[dict[str, Any]]]:
+    """One cheap fixtures-list call: live ids + status of every fixture.
+
+    Also returns the raw fixtures payload so the caller can refresh the
+    matches table from the same call (new knockout pairings, rescheduled
+    kickoffs) without spending extra quota."""
+    fixtures = api.fixtures(SEASON)
+    statuses = {fx["fixture"]["id"]: status_of(fx) for fx in fixtures}
     live = {fid for fid, st in statuses.items() if st == "live"}
-    return live, statuses
+    return live, statuses, fixtures
+
+
+def _team_groups_from_db(sb) -> dict[int, str]:
+    """team_id → group letter from the stored standings copy, so the matches
+    re-upsert doesn't clobber group_letter (parse_match derives it from this
+    mapping for group-stage rows)."""
+    rows = (
+        sb.table("standings").select("team_id,group_name").eq("season", SEASON).execute().data
+    )
+    return {
+        r["team_id"]: r["group_name"].removeprefix("Group ").strip()
+        for r in rows or []
+        if r.get("group_name")
+    }
+
+
+def refresh_matches(fixtures: list[dict[str, Any]]) -> None:
+    """Re-upsert the matches table from an already-fetched fixtures payload.
+
+    This is what surfaces new knockout fixtures (semifinal pairings appear in
+    the API only after the quarterfinals) and kickoff reschedules without a
+    manual backfill. Zero extra API quota — reuses the discovery call."""
+    sb = db.client()
+    pipeline.upsert_matches(sb, fixtures, SEASON, _team_groups_from_db(sb))
+
+
+def refresh_derived(api: ApiFootballClient) -> None:
+    """Post-finalize refresh so standings and Track 3 never lag a final whistle:
+    re-pull the stored standings copy, then rerun Elo + form + predictions.
+    Each step is guarded — a failure here must not kill the poll loop."""
+    try:
+        pipeline.upsert_standings(db.client(), api, SEASON)
+    except Exception:
+        log.exception("standings refresh failed")
+    try:
+        analytics.run(SEASON)
+    except Exception:
+        log.exception("analytics refresh failed")
 
 
 def _update_match_row(sb, fx: dict[str, Any]) -> None:
@@ -121,20 +164,23 @@ def seconds_until_next_kickoff(season: int) -> float | None:
     return (kickoff - datetime.now(timezone.utc)).total_seconds()
 
 
-def finalize_match(api: ApiFootballClient, match_id: int) -> None:
-    """Finalize step: write the immutable Track 2 dataset once at full-time."""
+def finalize_match(api: ApiFootballClient, match_id: int) -> bool:
+    """Finalize step: write the immutable Track 2 dataset once at full-time.
+    Returns True when the match was finalized (caller triggers the derived
+    refresh only when at least one finalize actually happened)."""
     rows = api.fixtures_by_ids([match_id])
     if not rows:
         log.error("cannot finalize %s: fixture not found", match_id)
-        return
+        return False
     fx = rows[0]
     sb = db.client()
     pipeline.ingest_fixture_details(sb, fx, SEASON)
     _update_match_row(sb, fx)
     log.info("finalized match %s", match_id)
+    return True
 
 
-def reconcile_stale_live(api: ApiFootballClient, statuses: dict[int, str]) -> None:
+def reconcile_stale_live(api: ApiFootballClient, statuses: dict[int, str]) -> int:
     """Reconcile matches pinned to a live status in the DB but no longer live
     per the API.
 
@@ -146,6 +192,8 @@ def reconcile_stale_live(api: ApiFootballClient, statuses: dict[int, str]) -> No
     can't rescue it because that only scans status == 'finished'. This is the
     general backstop: trust the API's current status for anything the DB still
     thinks is live.
+
+    Returns how many matches were finalized here.
     """
     sb = db.client()
     stuck = (
@@ -155,6 +203,7 @@ def reconcile_stale_live(api: ApiFootballClient, statuses: dict[int, str]) -> No
         .eq("status", "live")
         .execute()
     )
+    finalized = 0
     for row in stuck.data or []:
         mid = row["id"]
         true_status = statuses.get(mid)
@@ -162,13 +211,15 @@ def reconcile_stale_live(api: ApiFootballClient, statuses: dict[int, str]) -> No
             continue  # genuinely live (or unknown to the API) — leave it alone
         if true_status == "finished":
             log.warning("reconciling stale-live match %s → finished", mid)
-            finalize_match(api, mid)  # idempotent; corrects status_short to FT/AET/PEN
+            if finalize_match(api, mid):  # idempotent; corrects status_short to FT/AET/PEN
+                finalized += 1
         else:
             # Reverted to scheduled (postponement, etc.) — just refresh the row.
             log.warning("reconciling stale-live match %s → %s", mid, true_status)
             fixtures = api.fixtures_by_ids([mid])
             if fixtures:
                 _update_match_row(sb, fixtures[0])
+    return finalized
 
 
 def find_unfinalized_match_ids(season: int) -> list[int]:
@@ -210,23 +261,35 @@ def run() -> None:
         if now - last_discovery >= config.FIXTURE_DISCOVERY_INTERVAL or tracked_live:
             try:
                 if now - last_discovery >= config.FIXTURE_DISCOVERY_INTERVAL:
-                    live_ids, statuses = discover_live_match_ids(api)
+                    live_ids, statuses, fixtures = discover_live_match_ids(api)
                     last_discovery = now
+                    # Keep the matches table in sync with the API every discovery
+                    # cycle: new knockout fixtures/pairings and reschedules land
+                    # without a manual backfill (reuses the discovery payload).
+                    try:
+                        refresh_matches(fixtures)
+                    except Exception:
+                        log.exception("matches refresh failed")
+                    finalized = 0
                     # Matches we were tracking that are no longer live → finalize.
                     for finished_id in tracked_live - live_ids:
                         if statuses.get(finished_id) == "finished":
-                            finalize_match(api, finished_id)
+                            finalized += finalize_match(api, finished_id)
                     tracked_live = live_ids
                     # Backstop: rescue any match the DB still thinks is live but
                     # the API no longer does (outage across the whole match, or an
                     # out-of-band ESPN backfill that left a live status_short).
-                    reconcile_stale_live(api, statuses)
+                    finalized += reconcile_stale_live(api, statuses)
                     # Catch-up: finalize any finished match that slipped through
                     # (e.g. worker was restarted while a match was live — tracked_live
                     # starts empty so the transition is never witnessed directly).
                     for fid in find_unfinalized_match_ids(SEASON):
                         log.warning("catch-up finalizing match %s (no team_match_stats)", fid)
-                        finalize_match(api, fid)
+                        finalized += finalize_match(api, fid)
+                    # Any final whistle this cycle → refresh standings + Track 3
+                    # immediately so rankings/predictions never lag results.
+                    if finalized:
+                        refresh_derived(api)
 
                 status_shorts = write_snapshots(api, tracked_live)
             except Exception:
