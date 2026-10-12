@@ -1,5 +1,6 @@
 import { getSupabase } from "./supabase";
 import type {
+  EloHistoryRow,
   Match,
   MatchEvent,
   MatchLineup,
@@ -631,4 +632,47 @@ export function snapshotStat(
   if (stat?.value == null) return null;
   if (typeof stat.value === "string") return parseFloat(stat.value.replace("%", ""));
   return stat.value;
+}
+
+// ── sequential Elo replay (migration 0006) ──────────────────────────────────
+
+/** True for "relation does not exist" — lets pages degrade gracefully on a
+ *  database where migration 0006 hasn't been applied yet. */
+function isMissingTable(error: { code?: string } | null): boolean {
+  return error?.code === "42P01" || error?.code === "PGRST205";
+}
+
+/** Every step of the season's sequential Elo replay, in replay order. */
+export async function getEloHistory(season: number): Promise<EloHistoryRow[]> {
+  const { data, error } = await getSupabase()
+    .from("team_elo_history")
+    .select("*")
+    .eq("season", season)
+    .order("seq", { ascending: true })
+    .range(0, 999);
+  if (isMissingTable(error)) return [];
+  if (error) throw error;
+  return data as EloHistoryRow[];
+}
+
+/** The two Elo steps (one per side) recorded for a single match. */
+export async function getMatchElo(matchId: number): Promise<EloHistoryRow[]> {
+  const { data, error } = await getSupabase()
+    .from("team_elo_history")
+    .select("*")
+    .eq("match_id", matchId);
+  if (isMissingTable(error)) return [];
+  if (error) throw error;
+  return data as EloHistoryRow[];
+}
+
+/** match_id → team_id → { before, after } for the match cards. */
+export function eloByMatch(
+  history: EloHistoryRow[],
+): Record<number, Record<number, { before: number; after: number }>> {
+  const out: Record<number, Record<number, { before: number; after: number }>> = {};
+  for (const h of history) {
+    (out[h.match_id] ??= {})[h.team_id] = { before: h.elo_before, after: h.elo_after };
+  }
+  return out;
 }

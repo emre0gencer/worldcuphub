@@ -10,6 +10,12 @@ Long-running worker loop (NOT a cron job), status-driven per PROJECT_SPEC.md §3
 
 Season comes from API_FOOTBALL_SEASON (default 2026).
 
+End of life: once every fixture is finished and the Final has been played,
+the loop runs one last derived refresh and exits with status 0 (see
+`tournament_complete`). For 2026 that happened after the Final on 2026-07-19 —
+live ingestion is over; the season is maintained with
+`python -m worldcup_worker.finalize_season --season 2026`.
+
 Run: python -m worldcup_worker.ingest
 """
 
@@ -249,6 +255,16 @@ def find_unfinalized_match_ids(season: int) -> list[int]:
     return [fid for fid in finished_ids if fid not in done]
 
 
+def tournament_complete(statuses: dict[int, str], fixtures: list[dict[str, Any]]) -> bool:
+    """True once the Final has been played and nothing is scheduled or live.
+
+    This is the worker's end-of-life signal: after the final whistle of the
+    Final there is nothing left to poll, so live ingestion ends for good."""
+    if not statuses or any(st != "finished" for st in statuses.values()):
+        return False
+    return any(fx["league"].get("round") == "Final" for fx in fixtures)
+
+
 def run() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
     api = ApiFootballClient()
@@ -290,6 +306,19 @@ def run() -> None:
                     # immediately so rankings/predictions never lag results.
                     if finalized:
                         refresh_derived(api)
+                    # End of tournament → live ingestion is over. Run one last
+                    # derived refresh (standings + full Elo/Track 3 replay) and
+                    # exit cleanly; Railway's ON_FAILURE policy will not restart
+                    # a zero exit, so the service stays down without burning quota.
+                    if tournament_complete(statuses, fixtures):
+                        log.info(
+                            "tournament complete: all %d fixtures finished incl. the Final — "
+                            "live ingestion has ended; running final derived refresh and exiting",
+                            len(statuses),
+                        )
+                        refresh_derived(api)
+                        api.close()
+                        return
 
                 status_shorts = write_snapshots(api, tracked_live)
             except Exception:

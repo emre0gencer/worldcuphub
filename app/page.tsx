@@ -1,15 +1,29 @@
 import MatchTimeline from "@/components/MatchTimeline";
-import { getAllMatches, getLatestSnapshotMinute, getTeamSeasons } from "@/lib/queries";
+import TournamentSummary from "@/components/TournamentSummary";
+import {
+  eloByMatch,
+  getAllMatches,
+  getEloHistory,
+  getLatestSnapshotMinute,
+  getPlayerSeasonStats,
+  getTeamSeasons,
+} from "@/lib/queries";
+import { isComplete } from "@/lib/season";
 import { getActiveSeason } from "@/lib/season-server";
+import { summarizeTournament } from "@/lib/tournament";
 
-// Live scores must always be fresh — render per request.
+// Rendered per request so the page always mirrors the database (the worker is
+// the only writer; a re-run of finalize_season shows up immediately).
 export const dynamic = "force-dynamic";
 
 export default async function HomePage() {
   const season = await getActiveSeason();
-  const [matches, teamSeasons] = await Promise.all([
+  const complete = isComplete(season);
+  const [matches, teamSeasons, history, players] = await Promise.all([
     getAllMatches(season),
     getTeamSeasons(season),
+    getEloHistory(season),
+    complete ? getPlayerSeasonStats(season) : Promise.resolve([]),
   ]);
 
   if (matches.length === 0) {
@@ -20,7 +34,7 @@ export default async function HomePage() {
     );
   }
 
-  // Latest live clock per in-play match (a handful at most) for the card badges.
+  // Latest live clock per in-play match (only ever non-empty mid-tournament).
   const liveIds = matches.filter((m) => m.status === "live").map((m) => m.id);
   const liveMinutes: Record<number, number | null> = {};
   await Promise.all(
@@ -34,5 +48,15 @@ export default async function HomePage() {
     eloByTeam[ts.team_id] = { elo: ts.elo, initial_elo: ts.initial_elo };
   }
 
-  return <MatchTimeline matches={matches} liveMinutes={liveMinutes} eloByTeam={eloByTeam} />;
+  return (
+    <div className="space-y-12">
+      {complete && <TournamentSummary season={season} summary={summarizeTournament(matches, players)} />}
+      <MatchTimeline
+        matches={matches}
+        liveMinutes={liveMinutes}
+        eloByTeam={eloByTeam}
+        eloByMatch={eloByMatch(history)}
+      />
+    </div>
+  );
 }

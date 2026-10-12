@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import SectionHeading from "@/components/SectionHeading";
 import PlayerButton from "@/components/player/PlayerButton";
 import { getPlayerSeasonStats } from "@/lib/queries";
+import { isComplete } from "@/lib/season";
 import { getActiveSeason } from "@/lib/season-server";
 import type { PlayerSeasonStats, PlayerStatKey } from "@/lib/types";
 
@@ -95,7 +96,11 @@ export default async function PlayersPage() {
         <SectionHeading
           eyebrow="Leaderboards"
           title="Players"
-          standfirst={`Tournament leaderboards for ${season}, from per-match player statistics.`}
+          standfirst={
+            isComplete(season)
+              ? `Final ${season} tournament leaderboards — summed from every player's per-match statistics across all matches, extra time included (shootout kicks excluded).`
+              : `Tournament leaderboards for ${season}, from per-match player statistics.`
+          }
         />
       </section>
 

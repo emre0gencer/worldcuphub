@@ -70,10 +70,14 @@ def upsert_players(sb, api: ApiFootballClient, season: int) -> int:
     wins, matching upsert-overwrite semantics."""
     profiles_by_id: dict[int, dict[str, Any]] = {}
     season_stats_by_key: dict[tuple[int, int], dict[str, Any]] = {}
+    known_team_ids = {
+        r["team_id"]
+        for r in sb.table("team_seasons").select("team_id").eq("season", season).execute().data
+    }
     for entry in api.players(season):
         profile = parse_player_profile(entry)
         profiles_by_id[profile["id"]] = profile
-        stats = parse_player_season_stats(entry, season)
+        stats = parse_player_season_stats(entry, season, known_team_ids or None)
         if stats:
             season_stats_by_key[(stats["player_id"], stats["season"])] = stats
     profiles = list(profiles_by_id.values())

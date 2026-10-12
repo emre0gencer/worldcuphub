@@ -44,14 +44,19 @@ function dayLabel(key: string, todayKey: string): { label: string; date: string 
   return { label: fullDate(key), date: null };
 }
 
+type MatchElo = Record<number, Record<number, { before: number; after: number }>>;
+
 export default function MatchTimeline({
   matches,
   liveMinutes = {},
   eloByTeam,
+  eloByMatch,
 }: {
   matches: MatchWithTeams[];
   liveMinutes?: Record<number, number | null>;
   eloByTeam?: Record<number, EloEntry>;
+  /** Sequential-replay Elo step per finished match (team_elo_history). */
+  eloByMatch?: MatchElo;
 }) {
   // Re-evaluate live windows every minute without a server round-trip.
   const [now, setNow] = useState(() => Date.now());
@@ -123,6 +128,7 @@ export default function MatchTimeline({
         now={now}
         liveMinutes={liveMinutes}
         eloByTeam={eloByTeam}
+        eloByMatch={eloByMatch}
         isToday={isToday}
         anchorRef={isToday ? anchorRef : undefined}
       />,
@@ -144,6 +150,7 @@ function DaySection({
   now,
   liveMinutes,
   eloByTeam,
+  eloByMatch,
   isToday,
   anchorRef,
 }: {
@@ -153,6 +160,7 @@ function DaySection({
   now: number;
   liveMinutes: Record<number, number | null>;
   eloByTeam?: Record<number, EloEntry>;
+  eloByMatch?: MatchElo;
   isToday: boolean;
   anchorRef?: React.RefObject<HTMLElement | null>;
 }) {
@@ -182,7 +190,14 @@ function DaySection({
       </div>
       <div className="flex flex-wrap gap-3">
         {matches.map((m) => (
-          <MatchCard key={m.id} match={m} live={isLiveNow(m, now)} minute={liveMinutes[m.id]} eloByTeam={eloByTeam} />
+          <MatchCard
+            key={m.id}
+            match={m}
+            live={isLiveNow(m, now)}
+            minute={liveMinutes[m.id]}
+            eloByTeam={eloByTeam}
+            matchElo={eloByMatch && Object.keys(eloByMatch).length > 0 ? (eloByMatch[m.id] ?? {}) : undefined}
+          />
         ))}
       </div>
     </section>

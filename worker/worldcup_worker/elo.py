@@ -1,7 +1,10 @@
 """Live Elo update module — FIFA 2018 formula, idempotent replay.
 
 Always replays from initial_elo over all finished matches sorted by kickoff_at,
-then writes the result to the `elo` column on team_seasons. Never increments on
+then writes the result to the `elo` column on team_seasons AND the full
+per-match trajectory to `team_elo_history` (migration 0006) — so the rating
+history reads as if it had been computed sequentially at every final whistle,
+even for matches the live worker never witnessed. Never increments on
 top of the existing `elo` value, so reruns are always safe.
 
 2026-only: if initial_elo is NULL for all teams in the season (e.g. season=2022),
@@ -92,16 +95,25 @@ def update_elo(
     return elo_home + delta_home, elo_away + delta_away
 
 
-def compute_elo(
+def compute_elo_history(
     initial: dict[int, float],
     matches: list[dict],
-) -> dict[int, float]:
-    """Pure function: replay all finished matches in chronological order from
-    initial Elo values. Returns the final Elo for every team_id in initial.
+) -> tuple[dict[int, float], list[dict]]:
+    """Pure function: sequential replay that also records every step.
+
+    Replays finished matches in chronological order from the frozen seed and
+    returns (final_elo, history). `history` holds two rows per match — one per
+    side — with the Elo going in, the expected result W_e, the actual result W,
+    the importance I and the Elo coming out. This is exactly what a live worker
+    would have written had it run the update at every final whistle, so the
+    tournament's rating trajectory is reproducible from the seed alone, no
+    matter when (or how often) ingestion actually ran.
 
     matches must be sorted by kickoff_at ascending before calling.
     """
     current = dict(initial)
+    history: list[dict] = []
+    seq = 0
 
     for m in matches:
         home_id = m["home_team_id"]
@@ -116,14 +128,66 @@ def compute_elo(
             continue
 
         w_home, w_away = result_from_match(m)
-        stage = m.get("stage", "group")
-        new_home, new_away = update_elo(
-            current[home_id], current[away_id], w_home, w_away, stage
-        )
+        stage = m.get("stage") or "group"
+        before_home, before_away = current[home_id], current[away_id]
+        new_home, new_away = update_elo(before_home, before_away, w_home, w_away, stage)
         current[home_id] = new_home
         current[away_id] = new_away
 
-    return current
+        seq += 1
+        w_e_home = 1.0 / (10.0 ** (-(before_home - before_away) / 600.0) + 1.0)
+        for team_id, opp_id, before, after, w, w_e in (
+            (home_id, away_id, before_home, new_home, w_home, w_e_home),
+            (away_id, home_id, before_away, new_away, w_away, 1.0 - w_e_home),
+        ):
+            history.append(
+                {
+                    "match_id": m["id"],
+                    "team_id": team_id,
+                    "opponent_id": opp_id,
+                    "kickoff_at": m.get("kickoff_at"),
+                    "stage": stage,
+                    "seq": seq,
+                    "elo_before": round(before, 4),
+                    "elo_after": round(after, 4),
+                    "delta": round(after - before, 4),
+                    "expected": round(w_e, 4),
+                    "result": w,
+                    "importance": _I.get(stage, 50),
+                }
+            )
+
+    return current, history
+
+
+def compute_elo(
+    initial: dict[int, float],
+    matches: list[dict],
+) -> dict[int, float]:
+    """Pure function: replay all finished matches in chronological order from
+    initial Elo values. Returns the final Elo for every team_id in initial.
+
+    matches must be sorted by kickoff_at ascending before calling.
+    """
+    final, _ = compute_elo_history(initial, matches)
+    return final
+
+
+def write_history(sb, season: int, history: list[dict]) -> None:
+    """Replace the season's per-match Elo trajectory (migration 0006).
+
+    Delete-then-insert keeps the replay idempotent. Guarded so a database that
+    has not had 0006 applied yet still gets its team_seasons.elo update."""
+    try:
+        sb.table("team_elo_history").delete().eq("season", season).execute()
+        rows = [{**h, "season": season} for h in history]
+        for i in range(0, len(rows), 500):
+            sb.table("team_elo_history").insert(rows[i : i + 500]).execute()
+        log.info("wrote %d team_elo_history rows for season %s", len(rows), season)
+    except Exception:
+        log.exception(
+            "could not write team_elo_history (apply supabase/migrations/0006_elo_history.sql)"
+        )
 
 
 def run(season: int) -> None:
@@ -155,18 +219,21 @@ def run(season: int) -> None:
         .eq("season", season)
         .eq("status", "finished")
         .order("kickoff_at", desc=False)
+        .order("id", desc=False)  # deterministic order for simultaneous kickoffs
         .execute()
         .data
     )
 
     if not matches:
         log.info("season %s: no finished matches yet — Elo stays at seed values", season)
+        write_history(sb, season, [])
         # Still write initial_elo as current elo (in case seed just ran).
         for team_id, pts in seeded.items():
             sb.table("team_seasons").update({"elo": pts}).eq("team_id", team_id).eq("season", season).execute()
         return
 
-    final_elo = compute_elo(seeded, matches)
+    final_elo, history = compute_elo_history(seeded, matches)
+    write_history(sb, season, history)
 
     # Batch write: one update per team.
     for team_id, pts in final_elo.items():

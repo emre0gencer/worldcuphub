@@ -36,8 +36,9 @@ import argparse
 import logging
 import math
 from collections import defaultdict
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from statistics import mean, pstdev
+from zoneinfo import ZoneInfo
 
 log = logging.getLogger("analytics")
 
@@ -422,26 +423,165 @@ def _coerce_nulls(team_rows: list[dict], stat_columns: tuple[str, ...]) -> None:
         log.warning("coerced %d null stat values to 0 across %d rows", nulled, len(team_rows))
 
 
+# Matchday grouping uses the host-nation local date (ET): a 21:00 ET kickoff is
+# 01:00 UTC the next day, and would otherwise land on the wrong matchday.
+MATCHDAY_TZ = ZoneInfo("America/New_York")
+
+
+def matchday_of(kickoff: datetime) -> date:
+    return kickoff.astimezone(MATCHDAY_TZ).date()
+
+
+def _complete_rows(team_rows: list[dict], match_dates: dict[int, datetime]) -> list[dict]:
+    """Keep only matches with exactly two stat rows and a known kickoff — the
+    opponent join (spec §4) is undefined otherwise. Dropped matches are reported."""
+    by_match: dict[int, list[dict]] = defaultdict(list)
+    for r in team_rows:
+        by_match[r["match_id"]].append(r)
+    keep: list[dict] = []
+    for match_id, pair in by_match.items():
+        if len(pair) == 2 and match_id in match_dates:
+            keep.extend(pair)
+        else:
+            log.warning("match %s excluded from replay (%d stat rows)", match_id, len(pair))
+    return keep
+
+
+def replay_track3(
+    team_rows: list[dict],
+    matches: list[dict],
+    base_elo: dict[int, float],
+    elo_history: list[dict],
+    use_xg: bool,
+    now: datetime | None = None,
+) -> tuple[list[dict], list[dict]]:
+    """Pure function: rebuild Track 3 as if the job had run after EVERY matchday.
+
+    Live ingestion did not witness every final whistle, so the stored history
+    (team_form rows dated whenever the job happened to run, predictions made
+    with whatever Elo was current) was patchy. This replays the tournament in
+    order instead:
+
+    * one team_form row per team per matchday D, computed only from matches up
+      to and including D, with Elo priors taken from the start of D and the row's
+      `elo` set to the sequential rating at the end of D;
+    * one pre-match prediction per match, using the form snapshot of the
+      previous matchday and the exact pre-kickoff Elo from the replay — i.e.
+      what the model would genuinely have said before the game (no leakage).
+      `generated_at` is stamped one hour before kickoff for finished matches.
+
+    base_elo: team_id → seed Elo (initial_elo for 2026; the static elo for 2022,
+    where there is no history and Elo stays constant).
+    elo_history: rows from elo.compute_elo_history (empty for 2022).
+    Returns (team_form rows, prediction rows), both without `season`.
+    """
+    now = now or datetime.now(timezone.utc)
+    match_dates = {m["id"]: datetime.fromisoformat(m["kickoff_at"]) for m in matches}
+    rows = _complete_rows(team_rows, match_dates)
+    played_ids = {r["match_id"] for r in rows}
+    days = sorted({matchday_of(match_dates[mid]) for mid in played_ids})
+
+    # Elo state lookups from the sequential replay.
+    pre_match: dict[tuple[int, int], float] = {}
+    for h in elo_history:
+        pre_match[(h["match_id"], h["team_id"])] = h["elo_before"]
+    ordered = sorted(elo_history, key=lambda h: h["seq"])
+
+    def elo_at(day: date, inclusive: bool) -> dict[int, float]:
+        state = dict(base_elo)
+        for h in ordered:
+            d = matchday_of(match_dates[h["match_id"]])
+            if d < day or (inclusive and d == day):
+                state[h["team_id"]] = h["elo_after"]
+        return state
+
+    form_rows: list[dict] = []
+    snapshots: dict[date, dict[int, dict]] = {}
+    for day in days:
+        rows_d = [r for r in rows if matchday_of(match_dates[r["match_id"]]) <= day]
+        elo_start = elo_at(day, inclusive=False)
+        elo_end = elo_at(day, inclusive=True)
+        day_rows = compute_form(rows_d, match_dates, elo_start, day, use_xg)
+        for f in day_rows:
+            f["elo"] = round(elo_end.get(f["team_id"], f["elo"]), 4)
+        snapshots[day] = {f["team_id"]: f for f in day_rows}
+        form_rows.extend(day_rows)
+
+    final_elo = elo_at(days[-1], inclusive=True) if days else dict(base_elo)
+    neutral = {"_overall_raw": 0.0}
+
+    predictions: list[dict] = []
+    for m in sorted(matches, key=lambda x: match_dates[x["id"]]):
+        home, away = m.get("home_team_id"), m.get("away_team_id")
+        if not home or not away or home not in base_elo or away not in base_elo:
+            continue
+        kickoff = match_dates[m["id"]]
+        day = matchday_of(kickoff)
+        prior_days = [d for d in days if d < day]
+        form_by_team = snapshots[prior_days[-1]] if prior_days else {}
+        form_by_team = {
+            home: form_by_team.get(home, neutral),
+            away: form_by_team.get(away, neutral),
+        }
+        if (m["id"], home) in pre_match:
+            elo = {home: pre_match[(m["id"], home)], away: pre_match[(m["id"], away)]}
+        elif m.get("status") == "finished":
+            start = elo_at(day, inclusive=False)
+            elo = {home: start[home], away: start[away]}
+        else:
+            elo = {home: final_elo[home], away: final_elo[away]}
+        xgd = (
+            compute_team_xgd([r for r in rows if matchday_of(match_dates[r["match_id"]]) < day])
+            if use_xg
+            else {}
+        )
+        pred = predict_match(m, form_by_team, elo, use_xg, xgd)
+        if m.get("status") == "finished":
+            pred["generated_at"] = (kickoff - timedelta(hours=1)).isoformat()
+        elif m.get("status") == "scheduled":
+            pred["generated_at"] = now.isoformat()
+        else:
+            continue  # never (re)write a prediction for a match in play
+        predictions.append(pred)
+
+    return form_rows, predictions
+
+
+def _replace_season_rows(sb, table: str, season: int, rows: list[dict]) -> None:
+    sb.table(table).delete().eq("season", season).execute()
+    for i in range(0, len(rows), 500):
+        sb.table(table).insert(rows[i : i + 500]).execute()
+
+
 def run(season: int) -> None:
-    """Scheduled batch job: read accumulated stats for one season, recompute
-    Form Scores, run the model, write team_form + predictions."""
+    """Batch job: replay Elo, then rebuild the season's Track 3 (team_form
+    history + pre-match predictions) matchday by matchday. Fully idempotent —
+    every run rewrites the same history from the same immutable Track 2 data,
+    so it is safe to run mid-tournament or long after the final."""
     from . import db, elo as elo_module  # imported here so pure functions stay env-free
 
-    # Update Elo from initial seed + all finished matches before computing form.
-    # No-op for 2022 (initial_elo is NULL → elo_module.run returns immediately).
+    # Update Elo from initial seed + all finished matches (also writes the
+    # per-match team_elo_history). No-op for 2022 (initial_elo is NULL).
     elo_module.run(season)
 
     sb = db.client()
     team_seasons = (
-        sb.table("team_seasons").select("team_id, elo").eq("season", season).execute().data
+        sb.table("team_seasons")
+        .select("team_id, elo, initial_elo")
+        .eq("season", season)
+        .execute()
+        .data
     )
     team_rows = (
         sb.table("team_match_stats").select("*").eq("season", season).execute().data
     )
     matches = (
         sb.table("matches")
-        .select("id, season, home_team_id, away_team_id, kickoff_at, status")
+        .select("id, season, home_team_id, away_team_id, home_score, away_score, "
+                "pen_home, pen_away, stage, kickoff_at, status")
         .eq("season", season)
+        .order("kickoff_at", desc=False)
+        .order("id", desc=False)
         .execute()
         .data
     )
@@ -455,32 +595,30 @@ def run(season: int) -> None:
     check_consistency(team_rows)
     _coerce_nulls(team_rows, stat_columns)
 
-    match_dates = {m["id"]: datetime.fromisoformat(m["kickoff_at"]) for m in matches}
-    team_elo = {t["team_id"]: t["elo"] for t in team_seasons}
-    as_of = datetime.now(timezone.utc).date()
+    seeded = {t["team_id"]: t["initial_elo"] for t in team_seasons if t.get("initial_elo") is not None}
+    if seeded:
+        finished = [m for m in matches if m["status"] == "finished"]
+        _, history = elo_module.compute_elo_history(seeded, finished)
+        base_elo = {t["team_id"]: (t.get("initial_elo") or t["elo"]) for t in team_seasons}
+    else:
+        history = []
+        base_elo = {t["team_id"]: t["elo"] for t in team_seasons}
 
-    form_rows = compute_form(team_rows, match_dates, team_elo, as_of, use_xg)
-    form_by_team = {f["team_id"]: f for f in form_rows}
-    team_xgd = compute_team_xgd(team_rows) if use_xg else {}
+    form_rows, predictions = replay_track3(team_rows, matches, base_elo, history, use_xg)
 
     db_rows = [
         {**{k: v for k, v in f.items() if not k.startswith("_")}, "season": season}
         for f in form_rows
     ]
-    sb.table("team_form").upsert(db_rows, on_conflict="team_id,season,as_of_date").execute()
-    log.info("wrote %d team_form rows for season %s as of %s", len(db_rows), season, as_of)
+    _replace_season_rows(sb, "team_form", season, db_rows)
+    days = sorted({r["as_of_date"] for r in db_rows})
+    log.info(
+        "replayed team_form for season %s: %d rows over %d matchdays (%s → %s)",
+        season, len(db_rows), len(days), days[0] if days else "-", days[-1] if days else "-",
+    )
 
-    upcoming = [
-        m for m in matches
-        if m["status"] == "scheduled" and m["home_team_id"] and m["away_team_id"]
-    ]
-    predictions = [
-        {**predict_match(m, form_by_team, team_elo, use_xg, team_xgd), "season": season}
-        for m in upcoming
-    ]
-    if predictions:
-        sb.table("predictions").insert(predictions).execute()
-    log.info("wrote %d predictions for season %s (%s)", len(predictions), season, model_version)
+    _replace_season_rows(sb, "predictions", season, [{**p, "season": season} for p in predictions])
+    log.info("replayed %d pre-match predictions for season %s (%s)", len(predictions), season, model_version)
 
 
 if __name__ == "__main__":

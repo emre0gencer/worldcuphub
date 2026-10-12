@@ -356,6 +356,24 @@ export interface PlayerProfile {
 }
 
 // Track 3 — derived analytics
+
+/** One step of the sequential Elo replay (migration 0006): a team's rating
+ *  going into and coming out of one finished match. */
+export interface EloHistoryRow {
+  season: number;
+  match_id: number;
+  team_id: number;
+  opponent_id: number | null;
+  kickoff_at: string | null;
+  stage: Stage;
+  seq: number;
+  elo_before: number;
+  elo_after: number;
+  delta: number;
+  expected: number; // W_e
+  result: number; // W: 1 / 0.5 / 0 (shootout 0.75 / 0.5)
+  importance: number;
+}
 export interface TeamForm {
   id: number;
   team_id: number;

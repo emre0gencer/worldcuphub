@@ -1,6 +1,6 @@
 # World Cup HUB
 
-A read-only data platform and web app for the FIFA World Cup — currently running **live against the 2026 tournament**, with a fully-functional **2022 demo** available via `?season=2022`.
+A read-only data platform and web app for the FIFA World Cup — **live-ingested through the entire 2026 tournament** (11 June → Final on 19 July 2026, won by Spain), now a complete, cross-checked archive, with the **2022 tournament** available as a second edition via the season switcher.
 
 The project's core thesis: don't just display data from an API — *own* it. Every match, player stat, team metric, and derived score is ingested into a private database, processed by a custom analytics layer, and surfaced through a purpose-built frontend. The result is an end-to-end data product, not a widget wrapper.
 
@@ -94,7 +94,7 @@ W = 1.0 win / 0.5 draw / 0.0 loss; shootout: 0.75 win / 0.5 loss
 Knockout floor: a team cannot lose Elo in the knockout rounds (delta clamped to 0 if negative).
 ```
 
-Replay is always from `initial_elo` (idempotent — reruns never double-count). The result is written to `team_seasons.elo`. The frontend shows the drift with a ▲ green / ▼ red triangle in the match pre-match H2H and rankings pages. 2022 is unaffected (`initial_elo` is NULL → replay is a no-op).
+Replay is always from `initial_elo` (idempotent — reruns never double-count). The result is written to `team_seasons.elo`, and every step to `team_elo_history` (migration `0006`). The frontend shows the drift with a ▲ green / ▼ red triangle in the match pre-match H2H and rankings pages. 2022 is unaffected (`initial_elo` is NULL → replay is a no-op).
 
 A **baseline upset probability model** sits on top:
 
@@ -146,23 +146,42 @@ analytics batch job     ──────▶  stats + form + predictions ◀─
 
 ---
 
-## Current state — 2026 live + 2022 demo
+## Current state — 2026 complete, live ingestion ended
 
-The platform is live against the 2026 FIFA World Cup group stage:
+The 2026 tournament is over and **live ingestion has ended**. The worker ran from the opening match to the Final and then shut itself down (`ingest.tournament_complete`: once every fixture is finished and the Final has been played it runs one last derived refresh and exits 0, so Railway's `ON_FAILURE` policy leaves it stopped).
 
-- 72 fixtures across 12 groups (A–L), 48 teams, 415 players ingested.
-- Live ingestion worker running on Railway: discovers live matches every ~300s, polls them every 60s, writes a full snapshot time-series per match.
-- Finished matches fully finalized: team stats, player stats, events, lineups all written to Track 2. Catch-up finalization on every discovery cycle ensures no match is missed after a worker restart.
-- Group standings updated in real time, including in-progress match scores as provisional results.
-- Form Scores computed under `baseline-v3-xg` (xG + goals_prevented available from API-Football for 2026).
-- Player names resolved from the API payload at ingestion time; stub profiles (`Player {id}`) are no longer written for players missing from the `/players` endpoint.
+- **104 fixtures** — 72 group matches across 12 groups (A–L), then R32 → R16 → QF → SF → third place → Final; 48 teams.
+- **Champions: Spain** (1–0 a.e.t. v Argentina, 19 Jul 2026). Third: England (6–4 v France). Golden Boot: Kylian Mbappé, 10.
+- Every finished match carries the immutable Track 2 record (team + player stats, events, lineups). Matches the live worker never witnessed were finalized by the catch-up pass / backfill; their momentum charts are reconstructed from ESPN commentary.
+- The archive is closed out with one command that re-pulls, audits, cross-checks and replays (see below). Its report lands in `discovery/2026/FINAL_CROSSCHECK.md`.
+- The frontend is archive-aware (`SEASON_INFO` in `lib/season.ts`): the masthead and footer say live ingestion has ended, the home page leads with a tournament summary (champion, podium, the Final, the tournament in numbers, top scorer — all derived from owned data), and live-only UI only ever appears if the data itself says a match is live.
 
-The 2022 demo remains fully functional at `?season=2022`:
+The 2022 edition remains fully functional via the switcher: 64 matches, 833 players, Form Scores under `baseline-v2-noxg`.
 
-- 64 matches ingested through Argentina–France in the final.
-- 833 players with per-match granular stats.
-- Form Scores computed under `baseline-v2-noxg`.
-- Group standings, knockout bracket, match timelines, lineups, and player leaderboards all served from owned data.
+### Finalizing a completed season
+
+```bash
+cd worker
+python -m worldcup_worker.finalize_season --season 2026            # full run
+python -m worldcup_worker.finalize_season --season 2026 --skip-api # no API-Football re-pull
+python -m worldcup_worker.finalize_season --season 2026 --dry-run  # audit + cross-check only
+```
+
+1. **Re-pull** the whole season from API-Football (`backfill --force`) so every row is the provider's final, post-correction version.
+2. **Audit** owned data: 104 fixtures / 48 teams / exact stage counts, nothing left live or scheduled, two team-stat rows per match, player/event/lineup coverage, goal events vs. scoreline, opponent-join symmetry, no knockout draw without a shootout.
+3. **Cross-check** every result against ESPN's public scoreboard (an independent provider) and the hand-verified anchors in `reference_2026.py` (podium, Spain's knockout path, Golden Boot).
+4. **Replay** Elo and Track 3 sequentially (below).
+5. **Report** to `discovery/<season>/FINAL_CROSSCHECK.md`, including an Elo plausibility check — Spearman correlation between final Elo and how far each team actually went. Exits non-zero on any error.
+
+### Sequential replay — Elo & Track 3 as if computed at every final whistle
+
+Live ingestion did not witness every match (early Railway crash-loops, ESPN-recovered games), so the derived history it left behind was patchy: `team_form` rows dated whenever the job happened to run, predictions made with whatever Elo was current. `analytics.run()` now rebuilds it deterministically from the immutable Track 2 data:
+
+- **Elo** — replayed from the frozen FIFA seed over every finished match in kickoff order; each step (Elo in, `W_e`, `W`, `I`, Elo out) is stored in `team_elo_history` (migration `0006`). Match cards and match pages show what *that* result was worth; `/rankings` shows the final table with each team's path and the top-6 trajectories.
+- **Form** — one `team_form` row per team per matchday (host-nation local date), computed only from matches up to that day, with Elo priors from the start of the day.
+- **Predictions** — one pre-match prediction per match, using the previous matchday's form and the exact pre-kickoff Elo (no leakage). Finished match pages grade it ("called it" / "missed"), and `/rankings` has a model report card (accuracy, Brier vs. base-rate, Elo-favourite win rate, biggest upsets).
+
+Fully idempotent: rerunning produces the same history.
 
 ---
 
@@ -195,7 +214,14 @@ python -m worldcup_worker.backfill --season 2022    # ingest full 2022 dataset
 python -m worldcup_worker.analytics --season 2022   # compute Form Scores + predictions
 ```
 
-For 2026 live ingestion:
+For a live tournament:
 ```bash
-python -m worldcup_worker.ingest    # long-running poll loop; discovers + tracks live matches
+python -m worldcup_worker.ingest    # long-running poll loop; exits by itself after the Final
 ```
+
+For a completed one (2026 now):
+```bash
+python -m worldcup_worker.finalize_season --season 2026
+```
+
+Database: apply `supabase/migrations/0006_elo_history.sql` (SQL editor or `supabase db push`) before the first replay; the app and the worker both degrade gracefully without it.

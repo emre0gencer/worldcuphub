@@ -1,9 +1,12 @@
 export default function EloDelta({
   current,
   initial,
+  scope = "tournament",
 }: {
   current: number | null;
   initial: number | null;
+  /** "match": initial→current is one match's replay step; "tournament": seed→now. */
+  scope?: "match" | "tournament";
 }) {
   if (current == null || initial == null) return <span>—</span>;
   const delta = Math.round(current - initial);
@@ -18,7 +21,7 @@ export default function EloDelta({
       <span>{rounded}</span>
       <span
         className={`text-xs ${color}`}
-        title={`${up ? "+" : ""}${delta} since tournament start`}
+        title={`${up ? "+" : ""}${delta} Elo ${scope === "match" ? "from this match" : "since tournament start"}`}
       >
         {up ? "▲" : "▼"} {Math.abs(delta)}
       </span>

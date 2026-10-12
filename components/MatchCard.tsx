@@ -2,7 +2,11 @@ import Link from "next/link";
 import type { MatchWithTeams, Team } from "@/lib/types";
 import { getTeamColors } from "@/lib/team-colors";
 
-export type EloEntry = { elo: number; initial_elo: number | null };
+/** `elo` vs `initial_elo` drives the ▲/▼ chip. For a finished match the card
+ *  is fed that match's own step of the sequential replay (before → after), so
+ *  the chip shows what the result was worth; otherwise it's the tournament
+ *  drift (seed → current). */
+export type EloEntry = { elo: number; initial_elo: number | null; scope?: "match" | "tournament" };
 
 // ── color helpers ─────────────────────────────────────────────────────────────
 
@@ -29,7 +33,15 @@ function ensureWhiteContrast(hex: string): string {
 
 // ── sub-components ────────────────────────────────────────────────────────────
 
-function CompactElo({ elo, initial }: { elo: number; initial: number }) {
+function CompactElo({
+  elo,
+  initial,
+  scope = "tournament",
+}: {
+  elo: number;
+  initial: number;
+  scope?: "match" | "tournament";
+}) {
   const delta = Math.round(elo - initial);
   const rounded = Math.round(elo);
   const up = delta > 0;
@@ -40,7 +52,7 @@ function CompactElo({ elo, initial }: { elo: number; initial: number }) {
         <span
           className="rounded-sm px-0.5"
           style={{ backgroundColor: up ? "#16a34a" : "#dc2626" }}
-          title={`${up ? "+" : ""}${delta} since tournament start`}
+          title={`${up ? "+" : ""}${delta} Elo ${scope === "match" ? "from this match" : "since tournament start"}`}
         >
           {up ? "▲" : "▼"}{Math.abs(delta)}
         </span>
@@ -111,7 +123,7 @@ function TeamRow({
             {team?.name ?? "TBD"}
           </span>
           {eloEntry?.initial_elo != null && (
-            <CompactElo elo={eloEntry.elo} initial={eloEntry.initial_elo} />
+            <CompactElo elo={eloEntry.elo} initial={eloEntry.initial_elo} scope={eloEntry.scope} />
           )}
         </div>
       </div>
@@ -139,11 +151,14 @@ export default function MatchCard({
   live,
   minute,
   eloByTeam,
+  matchElo,
 }: {
   match: MatchWithTeams;
   live?: boolean;
   minute?: number | null;
   eloByTeam?: Record<number, EloEntry>;
+  /** This match's replay step per team (finished matches only). */
+  matchElo?: Record<number, { before: number; after: number }>;
 }) {
   const kickoff = new Date(match.kickoff_at);
   const isLive = live ?? match.status === "live";
@@ -154,6 +169,17 @@ export default function MatchCard({
         ? `${minute}'`
         : LIVE_PHASE[match.status_short] ?? "LIVE"
     : null;
+
+  const eloFor = (teamId: number | null): EloEntry | null => {
+    if (teamId == null) return null;
+    const step = matchElo?.[teamId];
+    if (step) return { elo: step.after, initial_elo: step.before, scope: "match" };
+    // Replay data exists but this team has no step for the match → don't show
+    // the end-of-tournament rating on a past card. With no replay data at all
+    // (migration 0006 not applied) fall back to the tournament drift.
+    if (matchElo !== undefined && match.status === "finished") return null;
+    return eloByTeam?.[teamId] ?? null;
+  };
 
   const homeColor = match.home_team
     ? getTeamColors(match.home_team.country_code).main
@@ -199,14 +225,14 @@ export default function MatchCard({
         team={match.home_team}
         score={match.home_score}
         pens={match.pen_home}
-        eloEntry={match.home_team_id != null ? eloByTeam?.[match.home_team_id] : null}
+        eloEntry={eloFor(match.home_team_id)}
         color={homeColor}
       />
       <TeamRow
         team={match.away_team}
         score={match.away_score}
         pens={match.pen_away}
-        eloEntry={match.away_team_id != null ? eloByTeam?.[match.away_team_id] : null}
+        eloEntry={eloFor(match.away_team_id)}
         color={awayColor}
       />
     </Link>

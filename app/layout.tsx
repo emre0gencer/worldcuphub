@@ -31,7 +31,8 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "World Cup HUB",
-  description: "Matches, stats, form and predictions for the 2026 FIFA World Cup",
+  description:
+    "The complete 2026 FIFA World Cup — every match, owned stats, sequential Elo, form and predictions. Live-ingested from the opening match to the Final.",
 };
 
 export default async function RootLayout({
@@ -87,7 +88,10 @@ export default async function RootLayout({
             World Cup HUB
           </p>
           <p className="mt-1.5 text-xs text-muted">
-            Read-only stats &amp; analytics &middot; Data: API-Football
+            Read-only stats &amp; analytics &middot; Data: API-Football, cross-checked against ESPN
+          </p>
+          <p className="mt-1 text-[0.7rem] text-muted/80">
+            2026 live ingestion ran 11 Jun – 19 Jul 2026 and has ended &middot; tournament archived
           </p>
         </footer>
       </body>

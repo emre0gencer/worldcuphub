@@ -15,6 +15,7 @@ import {
   getLatestPrediction,
   getLatestSnapshotMinute,
   getMatch,
+  getMatchElo,
   getMatchEvents,
   getMatchLineups,
   getPlayerMatchStats,
@@ -26,10 +27,12 @@ import {
   snapshotStat,
 } from "@/lib/queries";
 import type {
+  EloHistoryRow,
   MatchEvent,
   MatchLineupPlayer,
   MatchWithTeams,
   PlayerMatchStats,
+  Prediction,
   Team,
   TeamSeason,
 } from "@/lib/types";
@@ -53,17 +56,39 @@ function Logo({ team, size = "h-9 w-9" }: { team: Team | null; size?: string }) 
   return <img src={team.logo_url} alt={team.name} className={`${size} object-contain`} />;
 }
 
+/** Elo shown under a team in the header: for a finished match, that match's own
+ *  replay step (rating going in → coming out); otherwise seed → current. */
+function HeaderElo({ season, step }: { season?: TeamSeason; step?: EloHistoryRow }) {
+  if (step) {
+    return (
+      <span className="text-xs text-muted">
+        <EloDelta current={step.elo_after} initial={step.elo_before} scope="match" />
+      </span>
+    );
+  }
+  if (season?.initial_elo == null) return null;
+  return (
+    <span className="text-xs text-muted">
+      <EloDelta current={season.elo} initial={season.initial_elo} />
+    </span>
+  );
+}
+
 function MatchHeader({
   match,
   liveMinute,
   homeSeason,
   awaySeason,
+  eloSteps = [],
 }: {
   match: MatchWithTeams;
   liveMinute?: number | null;
   homeSeason?: TeamSeason;
   awaySeason?: TeamSeason;
+  eloSteps?: EloHistoryRow[];
 }) {
+  const homeStep = eloSteps.find((e) => e.team_id === match.home_team_id);
+  const awayStep = eloSteps.find((e) => e.team_id === match.away_team_id);
   const kickoff = new Date(match.kickoff_at);
   const stageLabel =
     match.stage === "group" && match.group_letter
@@ -91,11 +116,7 @@ function MatchHeader({
         <div className="flex w-40 flex-col items-center gap-2">
           <Logo team={match.home_team} />
           <span className="font-display text-lg font-bold tracking-tight">{match.home_team?.name ?? "TBD"}</span>
-          {homeSeason?.initial_elo != null && (
-            <span className="text-xs text-muted">
-              <EloDelta current={homeSeason.elo} initial={homeSeason.initial_elo} />
-            </span>
-          )}
+          <HeaderElo season={homeSeason} step={homeStep} />
         </div>
         <div className="w-32">
           {match.status === "scheduled" ? (
@@ -146,11 +167,7 @@ function MatchHeader({
         <div className="flex w-40 flex-col items-center gap-2">
           <Logo team={match.away_team} />
           <span className="font-display text-lg font-bold tracking-tight">{match.away_team?.name ?? "TBD"}</span>
-          {awaySeason?.initial_elo != null && (
-            <span className="text-xs text-muted">
-              <EloDelta current={awaySeason.elo} initial={awaySeason.initial_elo} />
-            </span>
-          )}
+          <HeaderElo season={awaySeason} step={awayStep} />
         </div>
       </div>
     </div>
@@ -614,19 +631,135 @@ function buildSquad(
     }));
 }
 
-async function FinishedView({ match }: { match: MatchWithTeams }) {
+/**
+ * What the model said BEFORE kickoff, graded against what happened. The
+ * prediction is the sequential replay's pre-match row (form from the previous
+ * matchday, Elo going into this match — no information from the game itself),
+ * and the Elo panel is this match's step of the replay: expected score W_e,
+ * actual W and the points that moved.
+ */
+function PreMatchModel({
+  match,
+  prediction,
+  eloSteps,
+}: {
+  match: MatchWithTeams;
+  prediction: Prediction | null;
+  eloSteps: EloHistoryRow[];
+}) {
+  const home = match.home_team!;
+  const away = match.away_team!;
+  const hStep = eloSteps.find((e) => e.team_id === home.id);
+  const aStep = eloSteps.find((e) => e.team_id === away.id);
+  if (!prediction && !hStep) return null;
+
+  const actual =
+    match.home_score! > match.away_score! ? 0 : match.home_score! < match.away_score! ? 2 : 1;
+  const outcomeLabel = [home.name, "Draw", away.name];
+  const probs = prediction
+    ? [prediction.home_win_prob, prediction.draw_prob, prediction.away_win_prob]
+    : null;
+  const pick = probs ? probs.indexOf(Math.max(...probs)) : null;
+  const pct = (v: number) => `${(v * 100).toFixed(0)}%`;
+  const signed = (v: number) => `${v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(1)}`;
+
+  return (
+    <section>
+      <h2 className="mb-2 eyebrow">
+        Pre-match model{" "}
+        {prediction && <span className="font-normal normal-case">({prediction.model_version}, replayed)</span>}
+      </h2>
+      <div className="grid gap-3 sm:grid-cols-2">
+        {probs && pick != null && (
+          <div className="rounded-xl border border-border-warm bg-surface p-4 shadow-sm">
+            <div className="mb-1 flex justify-between text-sm font-semibold">
+              <span>{home.name} <span className="font-mono tabular-nums">{pct(probs[0])}</span></span>
+              <span className="text-muted">Draw <span className="font-mono tabular-nums">{pct(probs[1])}</span></span>
+              <span>{away.name} <span className="font-mono tabular-nums">{pct(probs[2])}</span></span>
+            </div>
+            <div className="flex h-2 gap-0.5 overflow-hidden rounded-full">
+              <div className="bg-ink" style={{ width: `${probs[0] * 100}%` }} />
+              <div className="bg-[#cdbfa3]" style={{ width: `${probs[1] * 100}%` }} />
+              <div className="bg-foil" style={{ width: `${probs[2] * 100}%` }} />
+            </div>
+            <p className="mt-3 text-xs text-muted">
+              Model pick: <span className="font-semibold text-ink">{outcomeLabel[pick]}</span> · Result
+              {match.pen_home != null ? " (after 120′)" : ""}:{" "}
+              <span className="font-semibold text-ink">{outcomeLabel[actual]}</span>{" "}
+              {pick === actual ? (
+                <span className="font-semibold text-pitch">✓ called it</span>
+              ) : (
+                <span className="font-semibold text-flare">✗ missed</span>
+              )}
+              {" · "}
+              upset probability {pct(prediction!.upset_probability)}
+            </p>
+          </div>
+        )}
+        {hStep && aStep && (
+          <div className="rounded-xl border border-border-warm bg-surface p-4 shadow-sm">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="font-mono text-[0.6rem] uppercase tracking-[0.12em] text-muted">
+                  <th className="pb-1 text-left font-normal">Elo</th>
+                  <th className="pb-1 text-right font-normal">In</th>
+                  <th className="pb-1 text-right font-normal">W<sub>e</sub></th>
+                  <th className="pb-1 text-right font-normal">W</th>
+                  <th className="pb-1 text-right font-normal">Out</th>
+                </tr>
+              </thead>
+              <tbody className="font-mono tabular-nums">
+                {[
+                  { team: home, st: hStep },
+                  { team: away, st: aStep },
+                ].map(({ team, st }) => (
+                  <tr key={team.id} className="border-t border-border-light">
+                    <td className="py-1 font-sans font-semibold">{team.name}</td>
+                    <td className="py-1 text-right">{Math.round(st.elo_before)}</td>
+                    <td className="py-1 text-right">{st.expected.toFixed(2)}</td>
+                    <td className="py-1 text-right">{st.result}</td>
+                    <td className="py-1 text-right">
+                      {Math.round(st.elo_after)}{" "}
+                      <span className={st.delta > 0 ? "text-pitch" : st.delta < 0 ? "text-flare" : "text-muted"}>
+                        ({signed(st.delta)})
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <p className="mt-2 text-[0.7rem] leading-relaxed text-muted">
+              FIFA 2018 formula: Δ = I·(W − W<sub>e</sub>), I = {hStep.importance}
+              {hStep.stage !== "group" ? "; knockout losers can’t drop points" : ""}
+              {match.pen_home != null ? "; shootout W = 0.75 / 0.5" : ""}.
+            </p>
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+async function FinishedView({
+  match,
+  eloSteps = [],
+}: {
+  match: MatchWithTeams;
+  eloSteps?: EloHistoryRow[];
+}) {
   const home = match.home_team!;
   const away = match.away_team!;
   const homeColor = getTeamColors(home.country_code).main;
   const awayColor = getTeamColors(away.country_code).secondary;
 
-  const [teamStats, playerStats, events, lineups, snapshots, reconstructed] = await Promise.all([
+  const [teamStats, playerStats, events, lineups, snapshots, reconstructed, prediction] = await Promise.all([
     getTeamMatchStats(match.id),
     getPlayerMatchStats(match.id),
     getMatchEvents(match.id),
     getMatchLineups(match.id),
     getSnapshotSeries(match.id),
     getReconstructedMomentum(match.id),
+    getLatestPrediction(match.id),
   ]);
   const hs = teamStats.find((s) => s.team_id === home.id);
   const as = teamStats.find((s) => s.team_id === away.id);
@@ -694,6 +827,8 @@ async function FinishedView({ match }: { match: MatchWithTeams }) {
           </div>
         </section>
       )}
+
+      <PreMatchModel match={match} prediction={prediction} eloSteps={eloSteps} />
 
       {/* Momentum charts — from live snapshots, or reconstructed from ESPN
           commentary (real per-minute events) for matches never live-ingested. */}
@@ -861,9 +996,10 @@ export default async function MatchPage({ params }: PageProps<"/matches/[id]">) 
   const match = await getMatch(matchId);
   if (!match) notFound();
 
-  const [liveMinute, teamSeasons] = await Promise.all([
+  const [liveMinute, teamSeasons, eloSteps] = await Promise.all([
     match.status === "live" ? getLatestSnapshotMinute(matchId) : Promise.resolve(null),
     getTeamSeasons(match.season),
+    match.status === "finished" ? getMatchElo(matchId) : Promise.resolve([] as EloHistoryRow[]),
   ]);
 
   const homeSeason = teamSeasons.find((t) => t.team_id === match.home_team_id) ?? undefined;
@@ -871,10 +1007,16 @@ export default async function MatchPage({ params }: PageProps<"/matches/[id]">) 
 
   return (
     <div className="space-y-8">
-      <MatchHeader match={match} liveMinute={liveMinute} homeSeason={homeSeason} awaySeason={awaySeason} />
+      <MatchHeader
+        match={match}
+        liveMinute={liveMinute}
+        homeSeason={homeSeason}
+        awaySeason={awaySeason}
+        eloSteps={eloSteps}
+      />
       {match.status === "scheduled" && <ScheduledView match={match} homeSeason={homeSeason} awaySeason={awaySeason} />}
       {match.status === "live" && <LiveView match={match} />}
-      {match.status === "finished" && <FinishedView match={match} />}
+      {match.status === "finished" && <FinishedView match={match} eloSteps={eloSteps} />}
     </div>
   );
 }

@@ -4,7 +4,8 @@ import { DEFAULT_SEASON } from "@/lib/season";
  * Season-aware masthead — the dateline band of the almanac. Rendered in the
  * root layout (so it heads every page) with the active season passed in.
  * Reads as the title block of a printed football annual: edition mark, a
- * foil-stamped year, host, and the project's current status.
+ * foil-stamped year, host, and the project's status (both editions are now
+ * complete archives; the `live` pill style is kept for any future edition).
  */
 
 interface SeasonMeta {
@@ -25,9 +26,9 @@ const SEASON_META: Record<number, SeasonMeta> = {
     hostShort: "Qatar",
     hostDetail: null,
     edition: "22nd Edition",
-    statusLabel: "Finished demo",
+    statusLabel: "Backfilled archive",
     live: false,
-    note: "A finished demonstration of the product — the 2022 tournament, ingested end to end.",
+    note: "The 2022 tournament, backfilled end to end after the fact — the proving ground for the 2026 pipeline.",
   },
   2026: {
     bigYear: "26",
@@ -35,9 +36,9 @@ const SEASON_META: Record<number, SeasonMeta> = {
     hostShort: "USA · Mexico · Canada",
     hostDetail: null,
     edition: "26th Edition",
-    statusLabel: "Live ingestion",
-    live: true,
-    note: "An ongoing live ingestion — a project on continuum, updating as the 2026 tournament unfolds.",
+    statusLabel: "Live ingestion ended",
+    live: false,
+    note: "Ingested live from the opening match to the Final (11 Jun – 19 Jul 2026). The tournament is complete — every match finalized, cross-checked and archived.",
   },
 };
 
@@ -74,7 +75,7 @@ export default function SiteMasthead({ season }: { season: number }) {
           <span className="eyebrow">{meta.edition}</span>
           <span className="h-px flex-1 bg-gradient-to-r from-border-warm to-transparent" />
           <span className="hidden font-mono text-[0.6rem] uppercase tracking-[0.16em] text-muted sm:inline">
-            Matches · Stats · Form · Predictions
+            Matches · Stats · Elo · Form · Predictions
           </span>
         </div>
 
@@ -99,8 +100,9 @@ export default function SiteMasthead({ season }: { season: number }) {
               </p>
             )}
             <p className="mt-2.5 max-w-md text-sm leading-relaxed text-muted">
-              A read-only almanac of the FIFA World Cup — live scores, owned
-              statistics, opponent-adjusted form &amp; match predictions.
+              A read-only almanac of the FIFA World Cup — every result, owned
+              statistics, a sequential Elo, opponent-adjusted form &amp; match
+              predictions.
             </p>
           </div>
 

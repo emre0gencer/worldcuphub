@@ -382,16 +382,35 @@ def parse_player_profile(entry: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def parse_player_season_stats(entry: dict[str, Any], season: int) -> dict[str, Any] | None:
-    """One /players row → player_season_stats (stored API copy, cross-check)."""
+def parse_player_season_stats(
+    entry: dict[str, Any], season: int, known_team_ids: set[int] | None = None
+) -> dict[str, Any] | None:
+    """One /players row → player_season_stats (stored API copy, cross-check).
+
+    known_team_ids: the season's teams. The API occasionally files a player's
+    tournament stats under a team id that isn't one of the tournament's teams
+    (seen for 2026: team 1091); prefer an entry for a known team, and if there
+    is none keep the stats with team_id NULL rather than violating the FK."""
     stats = [s for s in entry["statistics"] if s["league"]["id"] == config.API_FOOTBALL_LEAGUE_ID]
     if not stats:
         return None
+    team_id: int | None = stats[0]["team"]["id"]
+    if known_team_ids is not None:
+        known = [s for s in stats if s["team"]["id"] in known_team_ids]
+        if known:
+            stats = known
+            team_id = known[0]["team"]["id"]
+        else:
+            log.warning(
+                "player %s (%s): season stats filed under unknown team %s — storing team_id NULL",
+                entry["player"]["id"], entry["player"].get("name"), team_id,
+            )
+            team_id = None
     s = stats[0]
     return {
         "player_id": entry["player"]["id"],
         "season": season,
-        "team_id": s["team"]["id"],
+        "team_id": team_id,
         "position": s["games"]["position"],
         "appearances": s["games"]["appearences"],  # API typo
         "lineups": s["games"]["lineups"],

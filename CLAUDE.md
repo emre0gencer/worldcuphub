@@ -20,11 +20,17 @@ Read-only web app + data platform for the 2026 FIFA World Cup. **PROJECT_SPEC.md
 - **Track 3 (derived)**: `team_form` (one row per team per matchday — history kept), `predictions` (history kept via `generated_at`; gated by `model_version`).
 - RLS: anon may SELECT everything; writes only via service key.
 
+## Status
+
+**2026 is complete; live ingestion has ended** (Final 2026-07-19). `SEASON_INFO` in `lib/season.ts` marks both seasons `complete`; `ingest.py` exits after the Final (`tournament_complete`). Maintenance is `python -m worldcup_worker.finalize_season --season 2026` (re-pull → audit → ESPN + `reference_2026.py` cross-check → sequential replay → `discovery/2026/FINAL_CROSSCHECK.md`).
+
 ## Key files
 
 - `worker/worldcup_worker/ingest.py` — long-running live poll loop (60s per live match, ~300s fixture discovery) + finalize step. Run: `python -m worldcup_worker.ingest`
 - `worker/worldcup_worker/analytics.py` — Form Score math (spec §5, steps 1–7 implemented exactly) + baseline upset model. Pure functions over dict rows; the Supabase-backed job is `run()`. Calls `elo.run(season)` first to update live Elo before computing form. Run: `python -m worldcup_worker.analytics`
-- `worker/worldcup_worker/elo.py` — Idempotent Elo replay (FIFA 2018 formula, scale 600): always replays from `initial_elo` over all finished matches sorted by `kickoff_at`, writes result to `team_seasons.elo`. 2026-only (no-op when `initial_elo` is NULL). Run: `python -m worldcup_worker.elo`
+- `worker/worldcup_worker/elo.py` — Idempotent Elo replay (FIFA 2018 formula, scale 600): always replays from `initial_elo` over all finished matches sorted by `kickoff_at`, writes result to `team_seasons.elo` and every per-match step to `team_elo_history` (migration 0006). 2026-only (no-op when `initial_elo` is NULL). Run: `python -m worldcup_worker.elo`
+- `analytics.run()` rebuilds ALL of a season's Track 3 sequentially (`replay_track3`): one `team_form` row per team per matchday (ET local date) + one leak-free pre-match prediction per match; season rows are replaced on each run.
+- `worker/worldcup_worker/finalize_season.py` + `reference_2026.py` — close-out/cross-check for a completed season. Run: `python -m worldcup_worker.finalize_season --season 2026 [--skip-api|--skip-espn|--dry-run]`
 - `worker/worldcup_worker/seed_elo.py` — Seeds `initial_elo`, `fifa_points`, and `elo` from `fifa_points_2026.py` for all teams in a season. Matches by `country_code` first, then name (with aliases). Unmatched teams get 1500 with a named warning. Run once after backfill: `python -m worldcup_worker.seed_elo --season 2026`
 - `worker/worldcup_worker/fifa_points_2026.py` — Static reference: 85-team FIFA Elo ranking as of 2026-06-15 (official update 2026-06-11). Used by seed_elo.py; update here if rankings are re-pulled.
 - `worker/worldcup_worker/backfill.py` — full-season ingestion (`python -m worldcup_worker.backfill --season 2022 [--force]`); shares `pipeline.py` building blocks with the live finalize step.
